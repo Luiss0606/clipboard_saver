@@ -226,6 +226,65 @@ fn install_update(state: tauri::State<AppState>) -> Result<(), String> {
 }
 
 #[tauri::command]
+fn delete_items(ids: Vec<u64>, app: AppHandle, state: tauri::State<AppState>) {
+    let mut core = state.core.lock().unwrap();
+    let removed = core.history.remove_many(&ids);
+    for old in &removed {
+        core.thumbs.remove(&old.id);
+    }
+    core.storage.delete_images(&removed);
+    core.persist();
+    drop(core);
+    let _ = app.emit("state-changed", ());
+}
+
+#[tauri::command]
+fn copy_selected(ids: Vec<u64>, state: tauri::State<AppState>) {
+    let core = state.core.lock().unwrap();
+
+    if ids.is_empty() {
+        return;
+    }
+
+    // Single image: send as image to clipboard.
+    if ids.len() == 1 {
+        if let Some(item) = core.history.get(ids[0]) {
+            let msg = match &item.kind {
+                ItemKind::Text(text) => Some(ClipboardMsg::SetText(text.clone())),
+                ItemKind::Image { png, .. } => {
+                    core.storage
+                        .load_image(png)
+                        .map(|(w, h, rgba)| ClipboardMsg::SetImage {
+                            width: w as usize,
+                            height: h as usize,
+                            rgba,
+                        })
+                }
+            };
+            if let Some(msg) = msg {
+                let _ = state.clipboard_tx.send(msg);
+            }
+            return;
+        }
+    }
+
+    // Multiple items: concatenate text items in selection order, skip images.
+    let mut parts: Vec<String> = Vec::new();
+    for id in &ids {
+        if let Some(item) = core.history.get(*id) {
+            if let ItemKind::Text(text) = &item.kind {
+                parts.push(text.clone());
+            }
+        }
+    }
+    if !parts.is_empty() {
+        let _ = state
+            .clipboard_tx
+            .send(ClipboardMsg::SetText(parts.join("\n")));
+    }
+}
+
+#[tauri::command]
 fn hide_panel(window: tauri::WebviewWindow) {
     let _ = window.hide();
 }
@@ -306,6 +365,8 @@ fn main() {
             get_state,
             restore_item,
             clear_history,
+            delete_items,
+            copy_selected,
             toggle_autostart,
             install_update,
             hide_panel,
