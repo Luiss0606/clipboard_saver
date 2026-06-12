@@ -27,25 +27,17 @@ análoga al clipboard de Windows (Win+V), pero nativa de Mac.
 
 ## Instalación
 
-### Desde GitHub Releases (recomendado)
+Una línea:
 
-1. Descarga `ClipboardSaver.dmg` del [último release](https://github.com/Luiss0606/clipboard_saver/releases/latest).
-2. Abre el `.dmg` y arrastra **Clipboard Saver.app** a `/Applications`.
-3. Abre la app, despliega el menú 📋 y activa **Iniciar con el sistema**.
-4. Listo: a partir de aquí la app se actualiza sola con cada release.
+```sh
+curl -fsSL https://raw.githubusercontent.com/Luiss0606/clipboard_saver/main/scripts/install.sh | bash
+```
 
-### Build local del .dmg
-
-1. Instala la herramienta de bundling (una sola vez):
-   ```sh
-   cargo install cargo-bundle
-   ```
-2. Genera el instalador:
-   ```sh
-   ./scripts/package.sh
-   ```
-   Nota: los builds locales no incluyen auto-update (no tienen
-   `APP_RELEASE_TAG` embebido).
+El script descarga el último release, instala **Clipboard Saver.app** en
+`/Applications` y la abre. Descargar con `curl` evita el atributo de
+quarantine, así que Gatekeeper no muestra ningún aviso pese a la firma
+ad-hoc. Después: despliega el menú 📋 y activa **Iniciar con el sistema**.
+A partir de ahí la app se actualiza sola con cada release.
 
 ### Modo desarrollo
 
@@ -59,10 +51,11 @@ cargo test         # unit tests de historial, storage y menú
 - **Permiso de portapapeles**: en macOS 15.4+ el sistema puede mostrar un
   aviso de privacidad la primera vez que la app lee el portapapeles. Es
   esperado: leer el portapapeles es exactamente lo que hace esta app.
-- **Gatekeeper**: la app se firma ad-hoc (sin cuenta de Apple Developer). El
-  `.dmg` generado localmente funciona sin fricción en esta misma Mac; si se
-  descarga desde internet en otra Mac, usar click derecho → Abrir la primera
-  vez.
+- **Gatekeeper**: la app se firma ad-hoc (sin cuenta de Apple Developer).
+  Tanto el instalador como las auto-actualizaciones descargan sin atributo
+  de quarantine, así que macOS nunca bloquea la app. Si alguna vez aparece
+  el aviso "Apple could not verify…", limpiarlo con:
+  `xattr -dr com.apple.quarantine "/Applications/Clipboard Saver.app"`.
 - **Privacidad**: el historial se guarda en disco sin cifrar. Si copias una
   contraseña, quedará en `~/Library/Application Support/clipboard_saver/`
   hasta que salga del historial o uses **Limpiar historial**.
@@ -73,7 +66,7 @@ cargo test         # unit tests de historial, storage y menú
 develop ──► trabajo diario; CI corre fmt + clippy + tests (ci.yml)
    │
    └─ PR develop → main
-main    ──► release.yml: tests → bundle .app → release v0.1.N (dmg + app.zip)
+main    ──► release.yml: tests → bundle .app → release v0.1.N (app.zip)
                   │
                   └─► la app instalada detecta el release y se auto-actualiza
 ```
