@@ -47,17 +47,12 @@ jobs:
           /usr/libexec/PlistBuddy -c "Add :LSUIElement bool true" "$APP_PATH/Contents/Info.plist" \
             || /usr/libexec/PlistBuddy -c "Set :LSUIElement true" "$APP_PATH/Contents/Info.plist"
           codesign --force --deep -s - "$APP_PATH"
-      - name: Package dmg and app zip
-        run: |
-          ditto -c -k --keepParent "$APP_PATH" ClipboardSaver.app.zip
-          STAGING="$(mktemp -d)"
-          cp -R "$APP_PATH" "$STAGING/"
-          ln -s /Applications "$STAGING/Applications"
-          hdiutil create -volname "Clipboard Saver" -srcfolder "$STAGING" -ov -format UDZO ClipboardSaver.dmg
+      - name: Package app zip
+        run: ditto -c -k --keepParent "$APP_PATH" ClipboardSaver.app.zip
       - name: Create GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "$TAG" ClipboardSaver.dmg ClipboardSaver.app.zip \
+          gh release create "$TAG" ClipboardSaver.app.zip \
             --title "Clipboard Saver $TAG" \
             --notes "$(git log -1 --pretty=%s)"

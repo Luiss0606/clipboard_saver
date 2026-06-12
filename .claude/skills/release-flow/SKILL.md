@@ -25,6 +25,7 @@ metadata:
 | Daily work on `develop` | Never commit directly to `main`. `develop` is the default branch |
 | Conventional commits | `feat:`, `fix:`, `ci:`, `docs:`, `chore:`, `build:`, `refactor:`, `test:`. NO Co-Authored-By or AI attribution |
 | Release = merge to `main` | PR `develop → main`. On merge, `release.yml` runs tests again, builds the .app, and publishes release `v0.1.N` (N = run number, automatic — no manual version bumps) |
+| Single release asset | `ClipboardSaver.app.zip` only. NO dmg — removed on purpose (Gatekeeper blocked browser-downloaded dmg). Canonical install: `curl -fsSL https://raw.githubusercontent.com/Luiss0606/clipboard_saver/main/scripts/install.sh \| bash` (curl skips quarantine) |
 | Tests gate everything | `ci.yml` (fmt + clippy -D warnings + test, macOS runner) must be green on `develop`/PRs; `release.yml` re-runs the same tests before building |
 | Auto-update | The installed app polls GitHub Releases every 6h and offers "Actualizar a vX y reiniciar". Updater is disabled in dev builds (no `APP_RELEASE_TAG`) |
 | macOS-only CI | Runners must be `macos-*`; the crate links AppKit and does not compile on Linux |
