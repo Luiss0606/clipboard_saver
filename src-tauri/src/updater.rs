@@ -33,6 +33,7 @@ struct Asset {
 }
 
 /// A downloaded release, ready to install.
+#[derive(Clone)]
 pub struct Update {
     pub tag: String,
     pub zip_path: PathBuf,
