@@ -3,6 +3,7 @@ mod history;
 mod item;
 mod menu;
 mod storage;
+mod updater;
 mod watcher;
 
 use std::time::{Duration, Instant};
@@ -25,6 +26,7 @@ const THUMB_MAX: u32 = 32;
 
 enum UserEvent {
     Menu(MenuEvent),
+    UpdateReady(updater::Update),
 }
 
 enum MenuAction {
@@ -38,6 +40,7 @@ struct App {
     storage: Storage,
     watcher: Watcher,
     thumbs: Thumbs,
+    pending_update: Option<updater::Update>,
 }
 
 impl App {
@@ -61,6 +64,7 @@ impl App {
             storage,
             watcher,
             thumbs,
+            pending_update: None,
         }
     }
 
@@ -71,7 +75,13 @@ impl App {
     }
 
     fn build_menu(&self) -> Menu {
-        menu::build(&self.history, &self.thumbs, autostart::is_enabled())
+        menu::build(
+            &self.history,
+            &self.thumbs,
+            autostart::is_enabled(),
+            updater::RELEASE_TAG.unwrap_or("dev"),
+            self.pending_update.as_ref().map(|u| u.tag.as_str()),
+        )
     }
 
     /// Polls the clipboard; returns true when the menu needs a rebuild.
@@ -138,6 +148,15 @@ impl App {
                 self.persist();
                 MenuAction::Refresh
             }
+            menu::ID_UPDATE => {
+                if let Some(update) = &self.pending_update {
+                    // On success this exits the process and relaunches.
+                    if let Err(e) = updater::install_and_relaunch(update) {
+                        eprintln!("clipboard_saver: update failed: {e}");
+                    }
+                }
+                MenuAction::None
+            }
             menu::ID_AUTOSTART => {
                 let result = if autostart::is_enabled() {
                     autostart::disable()
@@ -192,6 +211,11 @@ fn main() {
         let _ = proxy.send_event(UserEvent::Menu(event));
     }));
 
+    let update_proxy = event_loop.create_proxy();
+    updater::spawn(move |update| {
+        let _ = update_proxy.send_event(UserEvent::UpdateReady(update));
+    });
+
     let mut app = App::load();
     let mut tray: Option<TrayIcon> = None;
 
@@ -216,6 +240,12 @@ fn main() {
                     if let Some(tray) = &tray {
                         tray.set_menu(Some(Box::new(app.build_menu())));
                     }
+                }
+            }
+            Event::UserEvent(UserEvent::UpdateReady(update)) => {
+                app.pending_update = Some(update);
+                if let Some(tray) = &tray {
+                    tray.set_menu(Some(Box::new(app.build_menu())));
                 }
             }
             Event::UserEvent(UserEvent::Menu(menu_event)) => match app.handle_menu(&menu_event) {
