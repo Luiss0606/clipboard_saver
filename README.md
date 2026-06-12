@@ -19,10 +19,22 @@ análoga al clipboard de Windows (Win+V), pero nativa de Mac.
   app arranque sola al prender o reiniciar la Mac. Toma efecto en el próximo
   inicio de sesión.
 - Sin ícono en el Dock: es una app de tipo agente (solo menu bar).
+- **Auto-actualización**: la app revisa GitHub Releases cada 6 horas (y al
+  arrancar). Cuando hay versión nueva aparece "⬇ Actualizar a vX y reiniciar"
+  en el menú — un click descarga, reemplaza la app en `/Applications` y la
+  relanza. Los builds de desarrollo (`cargo run`) tienen el updater
+  desactivado.
 
 ## Instalación
 
-### Desde el .dmg
+### Desde GitHub Releases (recomendado)
+
+1. Descarga `ClipboardSaver.dmg` del [último release](https://github.com/Luiss0606/clipboard_saver/releases/latest).
+2. Abre el `.dmg` y arrastra **Clipboard Saver.app** a `/Applications`.
+3. Abre la app, despliega el menú 📋 y activa **Iniciar con el sistema**.
+4. Listo: a partir de aquí la app se actualiza sola con cada release.
+
+### Build local del .dmg
 
 1. Instala la herramienta de bundling (una sola vez):
    ```sh
@@ -32,9 +44,8 @@ análoga al clipboard de Windows (Win+V), pero nativa de Mac.
    ```sh
    ./scripts/package.sh
    ```
-3. Abre `ClipboardSaver.dmg` y arrastra **Clipboard Saver.app** a
-   `/Applications`.
-4. Abre la app, despliega el menú 📋 y activa **Iniciar con el sistema**.
+   Nota: los builds locales no incluyen auto-update (no tienen
+   `APP_RELEASE_TAG` embebido).
 
 ### Modo desarrollo
 
@@ -56,6 +67,21 @@ cargo test         # unit tests de historial, storage y menú
   contraseña, quedará en `~/Library/Application Support/clipboard_saver/`
   hasta que salga del historial o uses **Limpiar historial**.
 
+## Flujo de desarrollo y despliegue
+
+```
+develop ──► trabajo diario; CI corre fmt + clippy + tests (ci.yml)
+   │
+   └─ PR develop → main
+main    ──► release.yml: tests → bundle .app → release v0.1.N (dmg + app.zip)
+                  │
+                  └─► la app instalada detecta el release y se auto-actualiza
+```
+
+- Commits convencionales (`feat:`, `fix:`, `ci:`, `docs:`…).
+- El versionado es automático: `v0.1.N` con N = número de run de Actions.
+- Convención completa en [.claude/skills/release-flow/SKILL.md](.claude/skills/release-flow/SKILL.md).
+
 ## Arquitectura
 
 | Módulo | Responsabilidad |
@@ -65,4 +91,5 @@ cargo test         # unit tests de historial, storage y menú
 | `storage.rs` | Persistencia: `history.json` + imágenes PNG |
 | `menu.rs` | Construye el menú nativo (muda) desde el historial |
 | `autostart.rs` | LaunchAgent para inicio automático |
+| `updater.rs` | Auto-update desde GitHub Releases (check 6h, swap de .app, relaunch) |
 | `main.rs` | Event loop (tao), tray icon, wiring |

@@ -1,0 +1,63 @@
+name: Release
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  test:
+    name: test
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: Format
+        run: cargo fmt --check
+      - name: Lint
+        run: cargo clippy --all-targets -- -D warnings
+      - name: Test
+        run: cargo test
+
+  release:
+    name: release
+    needs: test
+    runs-on: macos-15
+    env:
+      TAG: v0.1.${{ github.run_number }}
+      APP_PATH: target/release/bundle/osx/Clipboard Saver.app
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Install cargo-bundle
+        run: cargo install cargo-bundle
+      - name: Build app bundle
+        env:
+          # Baked into the binary via option_env!; the in-app updater
+          # compares this tag against the latest GitHub release.
+          APP_RELEASE_TAG: v0.1.${{ github.run_number }}
+        run: |
+          cargo bundle --release
+          /usr/libexec/PlistBuddy -c "Add :LSUIElement bool true" "$APP_PATH/Contents/Info.plist" \
+            || /usr/libexec/PlistBuddy -c "Set :LSUIElement true" "$APP_PATH/Contents/Info.plist"
+          codesign --force --deep -s - "$APP_PATH"
+      - name: Package dmg and app zip
+        run: |
+          ditto -c -k --keepParent "$APP_PATH" ClipboardSaver.app.zip
+          STAGING="$(mktemp -d)"
+          cp -R "$APP_PATH" "$STAGING/"
+          ln -s /Applications "$STAGING/Applications"
+          hdiutil create -volname "Clipboard Saver" -srcfolder "$STAGING" -ov -format UDZO ClipboardSaver.dmg
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$TAG" ClipboardSaver.dmg ClipboardSaver.app.zip \
+            --title "Clipboard Saver $TAG" \
+            --notes "$(git log -1 --pretty=%s)"

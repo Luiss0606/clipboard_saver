@@ -10,6 +10,7 @@ use crate::item::ItemKind;
 pub const ID_CLEAR: &str = "clear";
 pub const ID_QUIT: &str = "quit";
 pub const ID_AUTOSTART: &str = "autostart";
+pub const ID_UPDATE: &str = "update";
 
 const PREVIEW_CHARS: usize = 60;
 const ITEM_ID_PREFIX: &str = "item:";
@@ -21,7 +22,16 @@ pub type Thumbs = HashMap<u64, (u32, u32, Vec<u8>)>;
 /// Builds the full tray menu from the current history. The menu is rebuilt
 /// from scratch on every change — at 40 items that is cheap and avoids
 /// tracking per-item menu state.
-pub fn build(history: &History, thumbs: &Thumbs, autostart_enabled: bool) -> Menu {
+///
+/// `version` is the installed release tag (or "dev"); `pending_update` is
+/// the tag of a downloaded release waiting to be installed.
+pub fn build(
+    history: &History,
+    thumbs: &Thumbs,
+    autostart_enabled: bool,
+    version: &str,
+    pending_update: Option<&str>,
+) -> Menu {
     let menu = Menu::new();
 
     if history.is_empty() {
@@ -47,6 +57,20 @@ pub fn build(history: &History, thumbs: &Thumbs, autostart_enabled: bool) -> Men
     }
 
     let _ = menu.append(&PredefinedMenuItem::separator());
+    let _ = menu.append(&MenuItem::with_id(
+        "version",
+        format!("Clipboard Saver {version}"),
+        false,
+        None,
+    ));
+    if let Some(tag) = pending_update {
+        let _ = menu.append(&MenuItem::with_id(
+            ID_UPDATE,
+            format!("⬇ Actualizar a {tag} y reiniciar"),
+            true,
+            None,
+        ));
+    }
     let _ = menu.append(&CheckMenuItem::with_id(
         ID_AUTOSTART,
         "Iniciar con el sistema",

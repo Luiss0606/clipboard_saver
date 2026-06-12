@@ -58,7 +58,8 @@ impl Storage {
         let file = format!("{hash:016x}.png");
         let img = image::RgbaImage::from_raw(width as u32, height as u32, rgba.to_vec())
             .ok_or("RGBA buffer does not match dimensions")?;
-        img.save(self.image_path(&file)).map_err(|e| e.to_string())?;
+        img.save(self.image_path(&file))
+            .map_err(|e| e.to_string())?;
         Ok(file)
     }
 
@@ -83,10 +84,8 @@ mod tests {
     use crate::item::ItemKind;
 
     fn temp_storage(tag: &str) -> Storage {
-        let dir = std::env::temp_dir().join(format!(
-            "clipboard_saver_test_{tag}_{}",
-            std::process::id()
-        ));
+        let dir =
+            std::env::temp_dir().join(format!("clipboard_saver_test_{tag}_{}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
         Storage::new(dir).unwrap()
     }
