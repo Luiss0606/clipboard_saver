@@ -29,10 +29,6 @@ impl History {
         self.items.iter().cloned().collect()
     }
 
-    pub fn is_empty(&self) -> bool {
-        self.items.is_empty()
-    }
-
     #[cfg(test)]
     pub fn len(&self) -> usize {
         self.items.len()

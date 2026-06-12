@@ -29,21 +29,23 @@ jobs:
     needs: test
     runs-on: macos-15
     env:
-      TAG: v0.1.${{ github.run_number }}
-      APP_PATH: target/release/bundle/osx/Clipboard Saver.app
+      TAG: v0.2.${{ github.run_number }}
+      APP_PATH: target/release/bundle/macos/Clipboard Saver.app
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      - name: Install cargo-bundle
-        run: cargo install cargo-bundle
+      - name: Install tauri-cli
+        run: |
+          curl -L --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/cargo-bins/cargo-binstall/main/install-from-binstall-release.sh | bash
+          cargo binstall tauri-cli --no-confirm
       - name: Build app bundle
         env:
           # Baked into the binary via option_env!; the in-app updater
           # compares this tag against the latest GitHub release.
-          APP_RELEASE_TAG: v0.1.${{ github.run_number }}
+          APP_RELEASE_TAG: v0.2.${{ github.run_number }}
         run: |
-          cargo bundle --release
+          cargo tauri build
           /usr/libexec/PlistBuddy -c "Add :LSUIElement bool true" "$APP_PATH/Contents/Info.plist" \
             || /usr/libexec/PlistBuddy -c "Set :LSUIElement true" "$APP_PATH/Contents/Info.plist"
           codesign --force --deep -s - "$APP_PATH"
