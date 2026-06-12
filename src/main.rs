@@ -21,8 +21,8 @@ use storage::Storage;
 use watcher::{Captured, Watcher};
 
 const POLL_INTERVAL: Duration = Duration::from_millis(400);
-/// Longest side of menu thumbnails, in pixels.
-const THUMB_MAX: u32 = 32;
+/// Longest side of menu thumbnails, in pixels (18pt at 2× retina).
+const THUMB_MAX: u32 = 36;
 
 enum UserEvent {
     Menu(MenuEvent),
@@ -277,10 +277,12 @@ fn make_thumb(width: u32, height: u32, rgba: Vec<u8>) -> (u32, u32, Vec<u8>) {
     (tw, th, thumb.into_raw())
 }
 
-/// 18×18 clipboard glyph drawn as a template icon (black + alpha), so macOS
-/// adapts it to light/dark menu bars. No external assets needed.
+/// Clipboard glyph drawn as a template icon (black + alpha), so macOS
+/// adapts it to light/dark menu bars. Rendered at 2× (36px) for retina —
+/// the menu bar always displays tray icons at 18pt. No external assets.
 fn tray_glyph() -> tray_icon::Icon {
     const SIZE: u32 = 18;
+    const SCALE: u32 = 2;
     const ART: [&str; 18] = [
         "......######......",
         "......#....#......",
@@ -301,13 +303,18 @@ fn tray_glyph() -> tray_icon::Icon {
         "..................",
         "..................",
     ];
-    let mut rgba = Vec::with_capacity((SIZE * SIZE * 4) as usize);
+    let px = SIZE * SCALE;
+    let mut rgba = Vec::with_capacity((px * px * 4) as usize);
     for row in ART {
         debug_assert_eq!(row.len(), SIZE as usize);
-        for c in row.chars() {
-            let alpha = if c == '#' { 255 } else { 0 };
-            rgba.extend_from_slice(&[0, 0, 0, alpha]);
+        for _ in 0..SCALE {
+            for c in row.chars() {
+                let alpha = if c == '#' { 255 } else { 0 };
+                for _ in 0..SCALE {
+                    rgba.extend_from_slice(&[0, 0, 0, alpha]);
+                }
+            }
         }
     }
-    tray_icon::Icon::from_rgba(rgba, SIZE, SIZE).expect("static glyph is valid")
+    tray_icon::Icon::from_rgba(rgba, px, px).expect("static glyph is valid")
 }
