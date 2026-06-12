@@ -41,13 +41,13 @@ const PANEL_HEIGHT: f64 = 540.0;
 const SHORTCUT: &str = "cmd+shift+v";
 
 enum ClipboardMsg {
-    SetText(String),
-    SetImage {
+    Text(String),
+    Image {
         width: usize,
         height: usize,
         rgba: Vec<u8>,
     },
-    SetItems(Vec<PasteItem>),
+    Items(Vec<PasteItem>),
 }
 
 /// Shared app data. The clipboard itself is NOT here: NSPasteboard handles
@@ -171,11 +171,11 @@ fn restore_item(id: u64, state: tauri::State<AppState>, window: tauri::WebviewWi
     let core = state.core.lock().unwrap();
     if let Some(item) = core.history.get(id) {
         let msg = match &item.kind {
-            ItemKind::Text(text) => Some(ClipboardMsg::SetText(text.clone())),
+            ItemKind::Text(text) => Some(ClipboardMsg::Text(text.clone())),
             ItemKind::Image { png, .. } => {
                 core.storage
                     .load_image(png)
-                    .map(|(w, h, rgba)| ClipboardMsg::SetImage {
+                    .map(|(w, h, rgba)| ClipboardMsg::Image {
                         width: w as usize,
                         height: h as usize,
                         rgba,
@@ -252,11 +252,11 @@ fn copy_selected(ids: Vec<u64>, state: tauri::State<AppState>) {
     if ids.len() == 1 {
         if let Some(item) = core.history.get(ids[0]) {
             let msg = match &item.kind {
-                ItemKind::Text(text) => Some(ClipboardMsg::SetText(text.clone())),
+                ItemKind::Text(text) => Some(ClipboardMsg::Text(text.clone())),
                 ItemKind::Image { png, .. } => {
                     core.storage
                         .load_image(png)
-                        .map(|(w, h, rgba)| ClipboardMsg::SetImage {
+                        .map(|(w, h, rgba)| ClipboardMsg::Image {
                             width: w as usize,
                             height: h as usize,
                             rgba,
@@ -295,7 +295,7 @@ fn copy_selected(ids: Vec<u64>, state: tauri::State<AppState>) {
     }
     items.extend(images);
     if !items.is_empty() {
-        let _ = state.clipboard_tx.send(ClipboardMsg::SetItems(items));
+        let _ = state.clipboard_tx.send(ClipboardMsg::Items(items));
     }
 }
 
@@ -337,13 +337,13 @@ fn clipboard_thread(app: AppHandle, rx: Receiver<ClipboardMsg>) {
     };
     loop {
         match rx.recv_timeout(POLL_INTERVAL) {
-            Ok(ClipboardMsg::SetText(text)) => watcher.set_text(&text),
-            Ok(ClipboardMsg::SetImage {
+            Ok(ClipboardMsg::Text(text)) => watcher.set_text(&text),
+            Ok(ClipboardMsg::Image {
                 width,
                 height,
                 rgba,
             }) => watcher.set_image(width, height, rgba),
-            Ok(ClipboardMsg::SetItems(items)) => watcher.set_items(items),
+            Ok(ClipboardMsg::Items(items)) => watcher.set_items(items),
             Err(RecvTimeoutError::Timeout) => {
                 if let Some(captured) = watcher.poll() {
                     let state = app.state::<AppState>();
