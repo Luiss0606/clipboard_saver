@@ -7,9 +7,13 @@ análoga al clipboard de Windows (Win+V), pero nativa de Mac.
 
 ## Características
 
-- Ícono en la menu bar con menú nativo: los últimos 40 copiados, con preview
-  de texto (60 caracteres) y thumbnails para imágenes.
-- Click en un ítem → vuelve al portapapeles, listo para pegar con ⌘V.
+- **Panel flotante estilo Win+V** (Tauri 2: backend Rust + UI nativa-like con
+  vibrancy de macOS): se abre desde el ícono de la menu bar o con **⌘⇧V**
+  desde cualquier app.
+- Últimos 40 copiados con búsqueda instantánea, previews de texto,
+  thumbnails de imágenes, timestamps relativos y atajos ⌘1–⌘9.
+- Click (o Enter) en un ítem → vuelve al portapapeles, listo para pegar con
+  ⌘V; el panel se oculta solo.
 - Deduplicación: copiar algo que ya está en el historial lo sube al tope en
   lugar de duplicarlo (mismo comportamiento que Windows).
 - Persistencia: el historial sobrevive reinicios. Se guarda en
@@ -42,8 +46,8 @@ A partir de ahí la app se actualiza sola con cada release.
 ### Modo desarrollo
 
 ```sh
-cargo run          # corre la app directamente
-cargo test         # unit tests de historial, storage y menú
+cargo tauri dev    # corre la app (requiere: cargo install tauri-cli)
+cargo test         # unit tests de historial, storage y panel
 ```
 
 ## Notas de macOS
@@ -77,12 +81,15 @@ main    ──► release.yml: tests → bundle .app → release v0.1.N (app.zip
 
 ## Arquitectura
 
-| Módulo | Responsabilidad |
+Backend 100% Rust (Tauri 2) + panel en HTML/CSS/JS vanilla (`ui/`, sin
+Node ni bundler).
+
+| Módulo (`src-tauri/src/`) | Responsabilidad |
 | --- | --- |
-| `watcher.rs` | Detecta cambios vía `NSPasteboard.changeCount` (polling 400ms) y lee texto/imagen con `arboard` |
+| `watcher.rs` | Detecta cambios vía `NSPasteboard.changeCount` (polling 400ms) y lee texto/imagen con `arboard`; vive en un hilo dedicado (NSPasteboard no es `Send`) |
 | `history.rs` | Cola de 40 ítems, dedupe por contenido, promoción al tope |
 | `storage.rs` | Persistencia: `history.json` + imágenes PNG |
-| `menu.rs` | Construye el menú nativo (muda) desde el historial |
+| `panel.rs` | DTOs y helpers (previews, URLs, timestamps) para la UI |
 | `autostart.rs` | LaunchAgent para inicio automático |
 | `updater.rs` | Auto-update desde GitHub Releases (check 6h, swap de .app, relaunch) |
-| `main.rs` | Event loop (tao), tray icon, wiring |
+| `main.rs` | Tauri: tray, ventana con vibrancy, comandos, hotkey global, hilos |
