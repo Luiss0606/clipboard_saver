@@ -193,7 +193,7 @@ mod tests {
     fn pick_asset_finds_app_zip() {
         let assets = vec![
             Asset {
-                name: "ClipboardSaver.dmg".into(),
+                name: "checksums.txt".into(),
                 browser_download_url: "u1".into(),
             },
             Asset {
