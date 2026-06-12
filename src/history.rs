@@ -33,6 +33,7 @@ impl History {
         self.items.is_empty()
     }
 
+    #[cfg(test)]
     pub fn len(&self) -> usize {
         self.items.len()
     }
