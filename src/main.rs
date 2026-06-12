@@ -45,8 +45,7 @@ struct App {
 
 impl App {
     fn load() -> Self {
-        let storage =
-            Storage::new(Storage::default_dir()).expect("cannot create data directory");
+        let storage = Storage::new(Storage::default_dir()).expect("cannot create data directory");
         let history = History::from_items(storage.load());
         let watcher = Watcher::new().expect("cannot access clipboard");
 

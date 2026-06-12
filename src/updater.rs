@@ -13,8 +13,7 @@ use serde::Deserialize;
 /// build must never replace itself with a release.
 pub const RELEASE_TAG: Option<&str> = option_env!("APP_RELEASE_TAG");
 
-const RELEASES_URL: &str =
-    "https://api.github.com/repos/Luiss0606/clipboard_saver/releases/latest";
+const RELEASES_URL: &str = "https://api.github.com/repos/Luiss0606/clipboard_saver/releases/latest";
 const USER_AGENT: &str = "clipboard-saver-updater";
 const FIRST_CHECK_DELAY: Duration = Duration::from_secs(30);
 const CHECK_INTERVAL: Duration = Duration::from_secs(6 * 60 * 60);
@@ -72,10 +71,7 @@ fn check_and_download(current_tag: &str) -> Result<Option<Update>, String> {
         .header("Accept", "application/vnd.github+json")
         .call()
         .map_err(|e| e.to_string())?;
-    let release: Release = response
-        .body_mut()
-        .read_json()
-        .map_err(|e| e.to_string())?;
+    let release: Release = response.body_mut().read_json().map_err(|e| e.to_string())?;
 
     if release.tag_name == current_tag {
         return Ok(None);
@@ -134,12 +130,15 @@ pub fn install_and_relaunch(update: &Update) -> Result<(), String> {
         .join("extracted");
     let _ = fs::remove_dir_all(&staging);
     fs::create_dir_all(&staging).map_err(|e| e.to_string())?;
-    run("ditto", &[
-        OsStr::new("-x"),
-        OsStr::new("-k"),
-        update.zip_path.as_os_str(),
-        staging.as_os_str(),
-    ])?;
+    run(
+        "ditto",
+        &[
+            OsStr::new("-x"),
+            OsStr::new("-k"),
+            update.zip_path.as_os_str(),
+            staging.as_os_str(),
+        ],
+    )?;
 
     let new_app = fs::read_dir(&staging)
         .map_err(|e| e.to_string())?
