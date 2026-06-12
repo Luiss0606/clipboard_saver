@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Clipboard Saver</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="panel">
+    <header class="header">
+      <svg class="header-icon" viewBox="0 0 16 16" aria-hidden="true">
+        <path d="M10 1.5H6a1 1 0 0 0-1 1H4A1.5 1.5 0 0 0 2.5 4v9A1.5 1.5 0 0 0 4 14.5h8A1.5 1.5 0 0 0 13.5 13V4A1.5 1.5 0 0 0 12 2.5h-1a1 1 0 0 0-1-1Zm-4 2h4v-1H6v1ZM5 6.25h6v1.1H5v-1.1Zm0 2.5h6v1.1H5v-1.1Zm0 2.5h4v1.1H5v-1.1Z"/>
+      </svg>
+      <input id="search" type="text" placeholder="Buscar en el historial…" autocomplete="off" spellcheck="false" />
+      <kbd class="hint">esc</kbd>
+    </header>
+
+    <div id="update-banner" class="update-banner hidden">
+      <span id="update-text"></span>
+      <button id="update-btn">Actualizar y reiniciar</button>
+    </div>
+
+    <main id="list" class="list" role="listbox" aria-label="Historial del portapapeles"></main>
+
+    <div id="empty" class="empty hidden">
+      <div class="empty-icon">📋</div>
+      <p class="empty-title">Historial vacío</p>
+      <p class="empty-hint">Copia texto o imágenes y aparecerán aquí.<br />Ábreme con <kbd>⌘⇧V</kbd>.</p>
+    </div>
+
+    <footer class="footer">
+      <span id="version" class="version"></span>
+      <span id="count" class="count"></span>
+      <div class="actions">
+        <label class="autostart" title="Iniciar con el sistema">
+          <input id="autostart" type="checkbox" />
+          <span>Al iniciar</span>
+        </label>
+        <button id="clear" class="ghost" title="Limpiar historial">Limpiar</button>
+        <button id="quit" class="ghost" title="Salir de Clipboard Saver">Salir</button>
+      </div>
+    </footer>
+  </div>
+  <script src="app.js"></script>
+</body>
+</html>

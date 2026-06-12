@@ -1,0 +1,23 @@
+[package]
+name = "clipboard_saver"
+version = "0.2.0"
+edition = "2021"
+description = "Clipboard history manager that lives in the macOS menu bar"
+license = "MIT"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = ["macos-private-api", "tray-icon"] }
+tauri-plugin-positioner = { version = "2", features = ["tray-icon"] }
+tauri-plugin-global-shortcut = "2"
+arboard = { version = "3.6", features = ["image-data"] }
+objc2 = "0.6"
+objc2-app-kit = "0.3"
+image = { version = "0.25", default-features = false, features = ["png"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+dirs = "6"
+ureq = { version = "3.3", features = ["json"] }
+base64 = "0.22"
