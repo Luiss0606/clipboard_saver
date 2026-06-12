@@ -27,7 +27,7 @@ impl Storage {
         self.base.join("history.json")
     }
 
-    fn image_path(&self, file: &str) -> PathBuf {
+    pub fn image_path(&self, file: &str) -> PathBuf {
         self.base.join("images").join(file)
     }
 

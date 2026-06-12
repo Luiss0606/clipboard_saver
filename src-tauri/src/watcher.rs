@@ -1,8 +1,22 @@
 use std::borrow::Cow;
+use std::path::PathBuf;
 
 use arboard::{Clipboard, ImageData};
 use objc2::rc::Retained;
-use objc2_app_kit::NSPasteboard;
+use objc2::runtime::ProtocolObject;
+use objc2_app_kit::{
+    NSPasteboard, NSPasteboardItem, NSPasteboardTypeFileURL, NSPasteboardTypePNG,
+    NSPasteboardTypeString, NSPasteboardWriting,
+};
+use objc2_foundation::{NSArray, NSData, NSString, NSURL};
+
+/// One element of a multi-item clipboard write. Images carry both the
+/// stored PNG file path and its bytes so target apps can paste either
+/// files (Finder-style) or image data.
+pub enum PasteItem {
+    Text(String),
+    Image { path: PathBuf, png: Vec<u8> },
+}
 
 /// Content read from the clipboard after a change was detected.
 pub enum Captured {
@@ -74,5 +88,42 @@ impl Watcher {
         if let Err(e) = self.clipboard.set_image(image) {
             eprintln!("clipboard_saver: cannot write image to clipboard: {e}");
         }
+    }
+
+    /// Writes several entries as one pasteboard item each, like copying
+    /// multiple files in Finder. arboard cannot do this (single item only),
+    /// so this goes through NSPasteboard directly.
+    pub fn set_items(&mut self, items: Vec<PasteItem>) {
+        let objects: Vec<Retained<ProtocolObject<dyn NSPasteboardWriting>>> = items
+            .into_iter()
+            .map(|item| {
+                let pb_item = NSPasteboardItem::new();
+                match item {
+                    PasteItem::Text(text) => {
+                        let ty = unsafe { NSPasteboardTypeString };
+                        pb_item.setString_forType(&NSString::from_str(&text), ty);
+                    }
+                    PasteItem::Image { path, png } => {
+                        let path = NSString::from_str(&path.to_string_lossy());
+                        if let Some(url) = NSURL::fileURLWithPath(&path).absoluteString() {
+                            let ty = unsafe { NSPasteboardTypeFileURL };
+                            pb_item.setString_forType(&url, ty);
+                        }
+                        let ty = unsafe { NSPasteboardTypePNG };
+                        pb_item.setData_forType(&NSData::with_bytes(&png), ty);
+                    }
+                }
+                ProtocolObject::from_retained(pb_item)
+            })
+            .collect();
+
+        self.pasteboard.clearContents();
+        let array = NSArray::from_retained_slice(&objects);
+        if !self.pasteboard.writeObjects(&array) {
+            eprintln!("clipboard_saver: cannot write items to clipboard");
+        }
+        // Skip self-capture: poll() re-decoding our PNG could yield different
+        // RGBA bytes (hence a different hash) and duplicate history entries.
+        self.last_count = self.pasteboard.changeCount();
     }
 }

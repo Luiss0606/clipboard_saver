@@ -9,6 +9,7 @@ mod updater;
 mod watcher;
 
 use std::collections::HashMap;
+use std::fs;
 use std::io::Cursor;
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
 use std::sync::Mutex;
@@ -30,7 +31,7 @@ use item::{fnv1a, ClipboardItem, ItemKind};
 use panel::{ItemDto, StateDto};
 use storage::Storage;
 use updater::Update;
-use watcher::{Captured, Watcher};
+use watcher::{Captured, PasteItem, Watcher};
 
 const POLL_INTERVAL: Duration = Duration::from_millis(400);
 /// Longest side of panel thumbnails, in pixels.
@@ -40,12 +41,13 @@ const PANEL_HEIGHT: f64 = 540.0;
 const SHORTCUT: &str = "cmd+shift+v";
 
 enum ClipboardMsg {
-    SetText(String),
-    SetImage {
+    Text(String),
+    Image {
         width: usize,
         height: usize,
         rgba: Vec<u8>,
     },
+    Items(Vec<PasteItem>),
 }
 
 /// Shared app data. The clipboard itself is NOT here: NSPasteboard handles
@@ -169,11 +171,11 @@ fn restore_item(id: u64, state: tauri::State<AppState>, window: tauri::WebviewWi
     let core = state.core.lock().unwrap();
     if let Some(item) = core.history.get(id) {
         let msg = match &item.kind {
-            ItemKind::Text(text) => Some(ClipboardMsg::SetText(text.clone())),
+            ItemKind::Text(text) => Some(ClipboardMsg::Text(text.clone())),
             ItemKind::Image { png, .. } => {
                 core.storage
                     .load_image(png)
-                    .map(|(w, h, rgba)| ClipboardMsg::SetImage {
+                    .map(|(w, h, rgba)| ClipboardMsg::Image {
                         width: w as usize,
                         height: h as usize,
                         rgba,
@@ -250,11 +252,11 @@ fn copy_selected(ids: Vec<u64>, state: tauri::State<AppState>) {
     if ids.len() == 1 {
         if let Some(item) = core.history.get(ids[0]) {
             let msg = match &item.kind {
-                ItemKind::Text(text) => Some(ClipboardMsg::SetText(text.clone())),
+                ItemKind::Text(text) => Some(ClipboardMsg::Text(text.clone())),
                 ItemKind::Image { png, .. } => {
                     core.storage
                         .load_image(png)
-                        .map(|(w, h, rgba)| ClipboardMsg::SetImage {
+                        .map(|(w, h, rgba)| ClipboardMsg::Image {
                             width: w as usize,
                             height: h as usize,
                             rgba,
@@ -268,19 +270,32 @@ fn copy_selected(ids: Vec<u64>, state: tauri::State<AppState>) {
         }
     }
 
-    // Multiple items: concatenate text items in selection order, skip images.
+    // Multiple items: text entries joined with newlines become one pasteboard
+    // item, each image becomes its own item (file URL + PNG data), so target
+    // apps can paste several images at once like a Finder multi-file copy.
     let mut parts: Vec<String> = Vec::new();
+    let mut images: Vec<PasteItem> = Vec::new();
     for id in &ids {
         if let Some(item) = core.history.get(*id) {
-            if let ItemKind::Text(text) = &item.kind {
-                parts.push(text.clone());
+            match &item.kind {
+                ItemKind::Text(text) => parts.push(text.clone()),
+                ItemKind::Image { png, .. } => {
+                    let path = core.storage.image_path(png);
+                    match fs::read(&path) {
+                        Ok(bytes) => images.push(PasteItem::Image { path, png: bytes }),
+                        Err(e) => eprintln!("clipboard_saver: cannot read image {png}: {e}"),
+                    }
+                }
             }
         }
     }
+    let mut items: Vec<PasteItem> = Vec::new();
     if !parts.is_empty() {
-        let _ = state
-            .clipboard_tx
-            .send(ClipboardMsg::SetText(parts.join("\n")));
+        items.push(PasteItem::Text(parts.join("\n")));
+    }
+    items.extend(images);
+    if !items.is_empty() {
+        let _ = state.clipboard_tx.send(ClipboardMsg::Items(items));
     }
 }
 
@@ -322,12 +337,13 @@ fn clipboard_thread(app: AppHandle, rx: Receiver<ClipboardMsg>) {
     };
     loop {
         match rx.recv_timeout(POLL_INTERVAL) {
-            Ok(ClipboardMsg::SetText(text)) => watcher.set_text(&text),
-            Ok(ClipboardMsg::SetImage {
+            Ok(ClipboardMsg::Text(text)) => watcher.set_text(&text),
+            Ok(ClipboardMsg::Image {
                 width,
                 height,
                 rgba,
             }) => watcher.set_image(width, height, rgba),
+            Ok(ClipboardMsg::Items(items)) => watcher.set_items(items),
             Err(RecvTimeoutError::Timeout) => {
                 if let Some(captured) = watcher.poll() {
                     let state = app.state::<AppState>();
