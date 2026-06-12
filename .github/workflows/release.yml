@@ -38,7 +38,8 @@ jobs:
       - name: Install tauri-cli
         run: |
           curl -L --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/cargo-bins/cargo-binstall/main/install-from-binstall-release.sh | bash
-          cargo binstall tauri-cli --no-confirm --locked
+          cargo binstall tauri-cli --no-confirm --locked --force
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
       - name: Build app bundle
         env:
           # Baked into the binary via option_env!; the in-app updater
