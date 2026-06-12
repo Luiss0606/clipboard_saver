@@ -86,6 +86,23 @@ impl History {
         (id, evicted)
     }
 
+    /// Removes items by IDs. Returns the removed items for storage cleanup.
+    pub fn remove_many(&mut self, ids: &[u64]) -> Vec<ClipboardItem> {
+        let id_set: std::collections::HashSet<u64> = ids.iter().copied().collect();
+        let mut removed = Vec::new();
+        let mut i = 0;
+        while i < self.items.len() {
+            if id_set.contains(&self.items[i].id) {
+                if let Some(item) = self.items.remove(i) {
+                    removed.push(item);
+                }
+            } else {
+                i += 1;
+            }
+        }
+        removed
+    }
+
     /// Removes everything, returning the removed items for cleanup.
     pub fn clear(&mut self) -> Vec<ClipboardItem> {
         self.items.drain(..).collect()
