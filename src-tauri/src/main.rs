@@ -278,7 +278,9 @@ fn copy_selected(ids: Vec<u64>, state: tauri::State<AppState>) {
         }
     }
     if !parts.is_empty() {
-        let _ = state.clipboard_tx.send(ClipboardMsg::SetText(parts.join("\n")));
+        let _ = state
+            .clipboard_tx
+            .send(ClipboardMsg::SetText(parts.join("\n")));
     }
 }
 
