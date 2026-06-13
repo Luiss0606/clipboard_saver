@@ -83,32 +83,50 @@ function render() {
 
   filtered.forEach((item, idx) => {
     const isChecked = selectedIds.includes(item.id);
+    const isImage = item.kind === "image" && item.thumb;
     const row = document.createElement("div");
     row.className =
       "row" +
+      (isImage ? " row-image" : "") +
       (idx === selected ? " selected" : "") +
       (isChecked ? " checked" : "");
     row.setAttribute("role", "option");
 
-    let leading;
-    if (item.kind === "image" && item.thumb) {
-      leading = `<img class="thumb" src="${item.thumb}" alt="" />`;
-    } else if (item.isUrl) {
-      leading = `<div class="chip url">${LINK_SVG}</div>`;
-    } else {
-      leading = '<div class="chip text">Aa</div>';
-    }
-
     const key = idx < 9 ? `<span class="row-key">⌘${idx + 1}</span>` : "";
-    row.innerHTML = `
-      <input type="checkbox" class="row-check" ${isChecked ? "checked" : ""} tabindex="-1" />
-      ${leading}
-      <div class="row-body">
+    const checkInput = `<input type="checkbox" class="row-check" ${
+      isChecked ? "checked" : ""
+    } tabindex="-1" />`;
+
+    if (isImage) {
+      // Content-first card: large contained preview, dimensions demoted to caption.
+      // Reserve the frame via aspect-ratio (parsed from "Imagen W×H") so the
+      // image load doesn't shift the masonry layout.
+      const dims = item.preview.match(/(\d+)\s*[×x]\s*(\d+)/);
+      const ratio = dims ? `${dims[1]} / ${dims[2]}` : "4 / 3";
+      row.innerHTML = `
+        ${checkInput}
+        <div class="img-frame" style="aspect-ratio:${ratio}"><img class="img-preview" src="${item.thumb}" alt="" /></div>
+        <div class="card-foot">
+          <span class="row-meta"></span>
+          ${key}
+        </div>`;
+      row.querySelector(".row-meta").textContent = `${item.preview} · ${item.ago}`;
+      const img = row.querySelector(".img-preview");
+      img.addEventListener("load", layoutMasonry);
+    } else {
+      const chip = item.isUrl
+        ? `<div class="chip url">${LINK_SVG}</div>`
+        : '<div class="chip text">Aa</div>';
+      row.innerHTML = `
+        ${checkInput}
+        <div class="card-head">${chip}</div>
         <div class="row-text"></div>
-        <div class="row-meta">${item.ago}</div>
-      </div>
-      ${key}`;
-    row.querySelector(".row-text").textContent = item.preview;
+        <div class="card-foot">
+          <span class="row-meta">${item.ago}</span>
+          ${key}
+        </div>`;
+      row.querySelector(".row-text").textContent = item.preview;
+    }
 
     const checkbox = row.querySelector(".row-check");
 
@@ -161,6 +179,17 @@ function render() {
   }
 
   updateActionBar();
+  layoutMasonry();
+}
+
+// Masonry: each card spans as many 1px grid rows as its height (plus the
+// vertical gap), so variable-height cards pack without leaving gaps.
+const MASONRY_GAP = 10;
+function layoutMasonry() {
+  for (const card of listEl.children) {
+    const h = card.getBoundingClientRect().height;
+    card.style.gridRowEnd = `span ${Math.ceil(h) + MASONRY_GAP}`;
+  }
 }
 
 function updateSelection() {
@@ -301,6 +330,8 @@ window.addEventListener("focus", () => {
   searchEl.focus();
   refresh();
 });
+
+window.addEventListener("resize", layoutMasonry);
 
 listen("state-changed", refresh);
 refresh();

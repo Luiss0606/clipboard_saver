@@ -35,9 +35,9 @@ use watcher::{Captured, PasteItem, Watcher};
 
 const POLL_INTERVAL: Duration = Duration::from_millis(400);
 /// Longest side of panel thumbnails, in pixels.
-const THUMB_MAX: u32 = 320;
-const PANEL_WIDTH: f64 = 380.0;
-const PANEL_HEIGHT: f64 = 540.0;
+const THUMB_MAX: u32 = 480;
+const PANEL_WIDTH: f64 = 480.0;
+const PANEL_HEIGHT: f64 = 560.0;
 const SHORTCUT: &str = "cmd+shift+v";
 
 enum ClipboardMsg {
