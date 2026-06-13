@@ -396,6 +396,10 @@ fn make_nonactivating_panel(window: &tauri::WebviewWindow) {
         object_setClass(ns, NSPanel::class());
         let win: &NSWindow = &*(ns as *const NSWindow);
         win.setStyleMask(win.styleMask() | NSWindowStyleMask::NonactivatingPanel);
+        // A non-activating panel's app is never active, so AppKit stops
+        // delivering mouse-moved events — which breaks CSS :hover and the
+        // per-item checkbox/selection affordance. Opt back in explicitly.
+        win.setAcceptsMouseMovedEvents(true);
     }
 }
 
