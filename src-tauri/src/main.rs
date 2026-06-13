@@ -11,13 +11,17 @@ mod watcher;
 use std::collections::HashMap;
 use std::fs;
 use std::io::Cursor;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 
 use base64::engine::general_purpose::STANDARD as BASE64;
 use base64::Engine;
+use objc2::runtime::{AnyClass, AnyObject};
+use objc2::ClassType;
+use objc2_app_kit::{NSPanel, NSWindow, NSWindowStyleMask};
 use tauri::image::Image;
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::utils::config::WindowEffectsConfig;
@@ -64,6 +68,19 @@ struct Core {
 struct AppState {
     core: Mutex<Core>,
     clipboard_tx: Sender<ClipboardMsg>,
+    /// Set while a native drag-out session is active, so the focus-loss
+    /// handler doesn't hide the panel out from under the drag.
+    dragging: Arc<AtomicBool>,
+}
+
+/// Payload for a drag-out. The native drag session is either inline text
+/// OR a set of files (the plugin can't mix the two), so an all-text
+/// selection drags as joined text and any image makes it a file drag.
+#[derive(serde::Serialize)]
+#[serde(tag = "kind", rename_all = "lowercase")]
+enum DragPayload {
+    Text { text: String },
+    Files { paths: Vec<String> },
 }
 
 impl Core {
@@ -300,6 +317,75 @@ fn copy_selected(ids: Vec<u64>, state: tauri::State<AppState>) {
 }
 
 #[tauri::command]
+fn drag_payload(ids: Vec<u64>, state: tauri::State<AppState>) -> Option<DragPayload> {
+    let core = state.core.lock().unwrap();
+
+    let mut texts: Vec<String> = Vec::new();
+    let mut paths: Vec<String> = Vec::new();
+    for id in &ids {
+        if let Some(item) = core.history.get(*id) {
+            match &item.kind {
+                ItemKind::Text(text) => texts.push(text.clone()),
+                ItemKind::Image { png, .. } => {
+                    paths.push(core.storage.image_path(png).to_string_lossy().into_owned());
+                }
+            }
+        }
+    }
+
+    // All text: drag the joined text inline.
+    if paths.is_empty() {
+        if texts.is_empty() {
+            return None;
+        }
+        return Some(DragPayload::Text {
+            text: texts.join("\n"),
+        });
+    }
+
+    // Mixed: keep the text by writing it to a temp file alongside the images.
+    if !texts.is_empty() {
+        let tmp = std::env::temp_dir().join("clipboard_saver_drag.txt");
+        if fs::write(&tmp, texts.join("\n")).is_ok() {
+            paths.push(tmp.to_string_lossy().into_owned());
+        }
+    }
+    Some(DragPayload::Files { paths })
+}
+
+#[tauri::command]
+fn set_dragging(on: bool, state: tauri::State<AppState>) {
+    state.dragging.store(on, Ordering::SeqCst);
+}
+
+/// Called when a drag-out ends: clears the drag guard and hides the panel.
+/// The panel is a non-activating NSPanel, so our app never stole focus from
+/// the drop target — hiding here leaves that app frontmost.
+#[tauri::command]
+fn finish_drag(window: tauri::WebviewWindow, state: tauri::State<AppState>) {
+    state.dragging.store(false, Ordering::SeqCst);
+    let _ = window.hide();
+}
+
+/// Reclass the window to a non-activating NSPanel so showing the panel never
+/// activates our app. That keeps whatever app the user was in (or dropped
+/// into) frontmost. Must run on the main thread.
+fn make_nonactivating_panel(window: &tauri::WebviewWindow) {
+    let Ok(ptr) = window.ns_window() else {
+        return;
+    };
+    let ns = ptr as *mut AnyObject;
+    extern "C" {
+        fn object_setClass(obj: *mut AnyObject, cls: *const AnyClass) -> *const AnyClass;
+    }
+    unsafe {
+        object_setClass(ns, NSPanel::class());
+        let win: &NSWindow = &*(ns as *const NSWindow);
+        win.setStyleMask(win.styleMask() | NSWindowStyleMask::NonactivatingPanel);
+    }
+}
+
+#[tauri::command]
 fn hide_panel(window: tauri::WebviewWindow) {
     let _ = window.hide();
 }
@@ -322,7 +408,16 @@ fn toggle_panel(app: &AppHandle) {
             let _ = win.move_window(Position::TopRight);
         }
         let _ = win.show();
-        let _ = win.set_focus();
+        // Make the panel key for keyboard input WITHOUT activating our app
+        // (it's a non-activating NSPanel), so the user's current app stays
+        // frontmost. set_focus() would call NSApp activate and steal focus.
+        let win2 = win.clone();
+        let _ = app.run_on_main_thread(move || {
+            if let Ok(ptr) = win2.ns_window() {
+                let w: &NSWindow = unsafe { &*(ptr as *const NSWindow) };
+                w.makeKeyAndOrderFront(None);
+            }
+        });
     }
 }
 
@@ -359,9 +454,11 @@ fn clipboard_thread(app: AppHandle, rx: Receiver<ClipboardMsg>) {
 fn main() {
     let (clipboard_tx, clipboard_rx) = mpsc::channel::<ClipboardMsg>();
     let clipboard_rx = Mutex::new(Some(clipboard_rx));
+    let dragging = Arc::new(AtomicBool::new(false));
 
     tauri::Builder::default()
         .plugin(tauri_plugin_positioner::init())
+        .plugin(tauri_plugin_drag::init())
         .plugin(
             tauri_plugin_global_shortcut::Builder::new()
                 .with_shortcuts([SHORTCUT])
@@ -376,6 +473,7 @@ fn main() {
         .manage(AppState {
             core: Mutex::new(Core::load()),
             clipboard_tx,
+            dragging: dragging.clone(),
         })
         .invoke_handler(tauri::generate_handler![
             get_state,
@@ -383,6 +481,9 @@ fn main() {
             clear_history,
             delete_items,
             copy_selected,
+            drag_payload,
+            set_dragging,
+            finish_drag,
             toggle_autostart,
             install_update,
             hide_panel,
@@ -409,10 +510,19 @@ fn main() {
                 })
                 .build()?;
 
+            // Turn the window into a non-activating panel so it never steals
+            // app focus (keeps the drop target / current app frontmost).
+            make_nonactivating_panel(&window);
+
             let win = window.clone();
+            let drag_flag = dragging.clone();
             window.on_window_event(move |event| {
                 if let WindowEvent::Focused(false) = event {
-                    let _ = win.hide();
+                    // Don't hide while a drag-out is in flight, or the native
+                    // drag session would be cancelled mid-gesture.
+                    if !drag_flag.load(Ordering::SeqCst) {
+                        let _ = win.hide();
+                    }
                 }
             });
 

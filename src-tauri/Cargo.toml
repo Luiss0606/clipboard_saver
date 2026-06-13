@@ -12,6 +12,7 @@ tauri-build = { version = "2", features = [] }
 tauri = { version = "2", features = ["macos-private-api", "tray-icon"] }
 tauri-plugin-positioner = { version = "2", features = ["tray-icon"] }
 tauri-plugin-global-shortcut = "2"
+tauri-plugin-drag = "2"
 arboard = { version = "3.6", features = ["image-data"] }
 objc2 = "0.6"
 objc2-app-kit = "0.3"
