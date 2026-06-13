@@ -70,12 +70,14 @@ struct AppState {
     dragging: Arc<AtomicBool>,
 }
 
-/// Payload for a drag-out: the full text, or the absolute PNG path.
+/// Payload for a drag-out. The native drag session is either inline text
+/// OR a set of files (the plugin can't mix the two), so an all-text
+/// selection drags as joined text and any image makes it a file drag.
 #[derive(serde::Serialize)]
 #[serde(tag = "kind", rename_all = "lowercase")]
-enum DragData {
+enum DragPayload {
     Text { text: String },
-    Image { path: String },
+    Files { paths: Vec<String> },
 }
 
 impl Core {
@@ -312,16 +314,40 @@ fn copy_selected(ids: Vec<u64>, state: tauri::State<AppState>) {
 }
 
 #[tauri::command]
-fn drag_data(id: u64, state: tauri::State<AppState>) -> Option<DragData> {
+fn drag_payload(ids: Vec<u64>, state: tauri::State<AppState>) -> Option<DragPayload> {
     let core = state.core.lock().unwrap();
-    let item = core.history.get(id)?;
-    match &item.kind {
-        ItemKind::Text(text) => Some(DragData::Text { text: text.clone() }),
-        ItemKind::Image { png, .. } => {
-            let path = core.storage.image_path(png).to_string_lossy().into_owned();
-            Some(DragData::Image { path })
+
+    let mut texts: Vec<String> = Vec::new();
+    let mut paths: Vec<String> = Vec::new();
+    for id in &ids {
+        if let Some(item) = core.history.get(*id) {
+            match &item.kind {
+                ItemKind::Text(text) => texts.push(text.clone()),
+                ItemKind::Image { png, .. } => {
+                    paths.push(core.storage.image_path(png).to_string_lossy().into_owned());
+                }
+            }
         }
     }
+
+    // All text: drag the joined text inline.
+    if paths.is_empty() {
+        if texts.is_empty() {
+            return None;
+        }
+        return Some(DragPayload::Text {
+            text: texts.join("\n"),
+        });
+    }
+
+    // Mixed: keep the text by writing it to a temp file alongside the images.
+    if !texts.is_empty() {
+        let tmp = std::env::temp_dir().join("clipboard_saver_drag.txt");
+        if fs::write(&tmp, texts.join("\n")).is_ok() {
+            paths.push(tmp.to_string_lossy().into_owned());
+        }
+    }
+    Some(DragPayload::Files { paths })
 }
 
 #[tauri::command]
@@ -416,7 +442,7 @@ fn main() {
             clear_history,
             delete_items,
             copy_selected,
-            drag_data,
+            drag_payload,
             set_dragging,
             toggle_autostart,
             install_update,

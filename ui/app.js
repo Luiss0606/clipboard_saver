@@ -163,10 +163,15 @@ function render() {
     });
 
     // Native drag-out: drop the card into another app (Finder, Notes, editor).
+    // Dragging a selected card drags the whole selection; otherwise just it.
     row.draggable = true;
     row.addEventListener("dragstart", (e) => {
       e.preventDefault(); // hand off to the native drag session
-      startDragOut(item);
+      const ids =
+        selectedIds.length > 1 && selectedIds.includes(item.id)
+          ? [...selectedIds]
+          : [item.id];
+      startDragOut(ids, item);
     });
 
     listEl.appendChild(row);
@@ -235,20 +240,28 @@ function textDragPreview(text) {
   return canvas.toDataURL("image/png");
 }
 
-// Starts a native drag-out session for the given item. The panel is kept
-// open during the drag (set_dragging guard) and hidden once it ends.
-async function startDragOut(item) {
-  const data = await invoke("drag_data", { id: item.id });
+// Starts a native drag-out session for the given items. When more than one
+// id is passed the whole selection is dragged. The panel stays open during
+// the drag (set_dragging guard) and hides once it ends.
+async function startDragOut(ids, leadItem) {
+  const data = await invoke("drag_payload", { ids });
   if (!data) return;
 
   let dragItem;
   let image;
-  if (data.kind === "image") {
-    dragItem = [data.path];
-    image = item.thumb; // already a data:image/png;base64 URL
+  if (data.kind === "files") {
+    dragItem = data.paths;
+    // Preview: the dragged image's thumb, else a labelled chip.
+    image =
+      leadItem.kind === "image" && leadItem.thumb
+        ? leadItem.thumb
+        : textDragPreview(`${ids.length} elementos`);
   } else {
     dragItem = { data: data.text, types: ["public.utf8-plain-text"] };
-    image = textDragPreview(data.text);
+    image =
+      ids.length > 1
+        ? textDragPreview(`${ids.length} elementos`)
+        : textDragPreview(data.text);
   }
 
   await invoke("set_dragging", { on: true });
