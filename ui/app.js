@@ -13,6 +13,8 @@ let filtered = [];
 let selected = 0;
 // Ordered by click time — sent to backend in this order for concatenation.
 let selectedIds = [];
+// Type filter: "all" | "text" | "image".
+let typeFilter = "all";
 
 const LINK_SVG =
   '<svg viewBox="0 0 16 16"><path d="M8 1.5a6.5 6.5 0 1 0 0 13 6.5 6.5 0 0 0 0-13Zm4.9 6H10.8a10.6 10.6 0 0 0-1-4.2A5.3 5.3 0 0 1 12.9 7.5ZM8 2.8c.6.7 1.3 2.1 1.5 4.7h-3C6.7 4.9 7.4 3.5 8 2.8ZM3.1 8.5h2.1a10.6 10.6 0 0 0 1 4.2 5.3 5.3 0 0 1-3.1-4.2Zm2.1-1H3.1a5.3 5.3 0 0 1 3.1-4.2 10.6 10.6 0 0 0-1 4.2ZM8 13.2c-.6-.7-1.3-2.1-1.5-4.7h3c-.2 2.6-.9 4-1.5 4.7Zm1.8-.5a10.6 10.6 0 0 0 1-4.2h2.1a5.3 5.3 0 0 1-3.1 4.2Z"/></svg>';
@@ -46,9 +48,11 @@ function updateActionBar() {
 
 function render() {
   const q = searchEl.value.trim().toLowerCase();
-  filtered = q
-    ? state.items.filter((it) => it.preview.toLowerCase().includes(q))
-    : state.items;
+  filtered = state.items.filter(
+    (it) =>
+      (typeFilter === "all" || it.kind === typeFilter) &&
+      (!q || it.preview.toLowerCase().includes(q))
+  );
   if (selected >= filtered.length) selected = Math.max(0, filtered.length - 1);
 
   listEl.innerHTML = "";
@@ -171,6 +175,24 @@ searchEl.addEventListener("input", () => {
   render();
 });
 
+function setTypeFilter(filter) {
+  if (filter === typeFilter) return;
+  typeFilter = filter;
+  [...$("type-filter").children].forEach((btn) => {
+    const active = btn.dataset.filter === filter;
+    btn.classList.toggle("active", active);
+    btn.setAttribute("aria-selected", active ? "true" : "false");
+  });
+  selected = 0;
+  clearSelection();
+  render();
+}
+
+$("type-filter").addEventListener("click", (e) => {
+  const btn = e.target.closest(".seg");
+  if (btn) setTypeFilter(btn.dataset.filter);
+});
+
 document.addEventListener("keydown", (e) => {
   if (e.key === "Escape") {
     if (selectedIds.length > 0) {
@@ -244,6 +266,7 @@ window.addEventListener("focus", () => {
   searchEl.value = "";
   selected = 0;
   clearSelection();
+  setTypeFilter("all");
   searchEl.focus();
   refresh();
 });
