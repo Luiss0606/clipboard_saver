@@ -83,32 +83,44 @@ function render() {
 
   filtered.forEach((item, idx) => {
     const isChecked = selectedIds.includes(item.id);
+    const isImage = item.kind === "image" && item.thumb;
     const row = document.createElement("div");
     row.className =
       "row" +
+      (isImage ? " row-image" : "") +
       (idx === selected ? " selected" : "") +
       (isChecked ? " checked" : "");
     row.setAttribute("role", "option");
 
-    let leading;
-    if (item.kind === "image" && item.thumb) {
-      leading = `<img class="thumb" src="${item.thumb}" alt="" />`;
-    } else if (item.isUrl) {
-      leading = `<div class="chip url">${LINK_SVG}</div>`;
-    } else {
-      leading = '<div class="chip text">Aa</div>';
-    }
-
     const key = idx < 9 ? `<span class="row-key">⌘${idx + 1}</span>` : "";
-    row.innerHTML = `
-      <input type="checkbox" class="row-check" ${isChecked ? "checked" : ""} tabindex="-1" />
-      ${leading}
-      <div class="row-body">
-        <div class="row-text"></div>
-        <div class="row-meta">${item.ago}</div>
-      </div>
-      ${key}`;
-    row.querySelector(".row-text").textContent = item.preview;
+    const checkInput = `<input type="checkbox" class="row-check" ${
+      isChecked ? "checked" : ""
+    } tabindex="-1" />`;
+
+    if (isImage) {
+      // Content-first card: large contained preview, dimensions demoted to caption.
+      row.innerHTML = `
+        ${checkInput}
+        <div class="img-frame"><img class="img-preview" src="${item.thumb}" alt="" /></div>
+        <div class="img-caption">
+          <span class="row-meta"></span>
+          ${key}
+        </div>`;
+      row.querySelector(".row-meta").textContent = `${item.preview} · ${item.ago}`;
+    } else {
+      const leading = item.isUrl
+        ? `<div class="chip url">${LINK_SVG}</div>`
+        : '<div class="chip text">Aa</div>';
+      row.innerHTML = `
+        ${checkInput}
+        ${leading}
+        <div class="row-body">
+          <div class="row-text"></div>
+          <div class="row-meta">${item.ago}</div>
+        </div>
+        ${key}`;
+      row.querySelector(".row-text").textContent = item.preview;
+    }
 
     const checkbox = row.querySelector(".row-check");
 
