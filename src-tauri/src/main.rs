@@ -23,6 +23,7 @@ use objc2::runtime::{AnyClass, AnyObject};
 use objc2::ClassType;
 use objc2_app_kit::{NSPanel, NSWindow, NSWindowStyleMask};
 use tauri::image::Image;
+use tauri::menu::{CheckMenuItem, Menu, MenuItem, PredefinedMenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::utils::config::WindowEffectsConfig;
 use tauri::utils::{WindowEffect, WindowEffectState};
@@ -207,8 +208,9 @@ fn restore_item(id: u64, state: tauri::State<AppState>, window: tauri::WebviewWi
     let _ = window.hide();
 }
 
-#[tauri::command]
-fn clear_history(app: AppHandle, state: tauri::State<AppState>) {
+/// Wipes the whole history. Shared by the panel command and the tray menu.
+fn clear_all(app: &AppHandle) {
+    let state = app.state::<AppState>();
     let mut core = state.core.lock().unwrap();
     let removed = core.history.clear();
     core.storage.delete_images(&removed);
@@ -218,8 +220,9 @@ fn clear_history(app: AppHandle, state: tauri::State<AppState>) {
     let _ = app.emit("state-changed", ());
 }
 
-#[tauri::command]
-fn toggle_autostart(app: AppHandle) {
+/// Flips launch-at-login and keeps the tray menu checkbox in sync. Shared by
+/// the panel command and the tray menu.
+fn toggle_autostart_inner(app: &AppHandle) {
     let result = if autostart::is_enabled() {
         autostart::disable()
     } else {
@@ -228,7 +231,18 @@ fn toggle_autostart(app: AppHandle) {
     if let Err(e) = result {
         eprintln!("clipboard_saver: cannot toggle autostart: {e}");
     }
+    rebuild_tray_menu(app);
     let _ = app.emit("state-changed", ());
+}
+
+#[tauri::command]
+fn clear_history(app: AppHandle) {
+    clear_all(&app);
+}
+
+#[tauri::command]
+fn toggle_autostart(app: AppHandle) {
+    toggle_autostart_inner(&app);
 }
 
 #[tauri::command]
@@ -395,6 +409,92 @@ fn quit_app(app: AppHandle) {
     app.exit(0);
 }
 
+/// Builds the right-click tray menu, reflecting current autostart and update
+/// state. Rebuilt via [`rebuild_tray_menu`] whenever that state changes.
+fn build_tray_menu(app: &AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
+    let autostart_on = autostart::is_enabled();
+    let pending = app
+        .state::<AppState>()
+        .core
+        .lock()
+        .unwrap()
+        .pending_update
+        .clone();
+
+    let show = MenuItem::with_id(app, "show", "Mostrar Clipboard Saver", true, None::<&str>)?;
+    let sep1 = PredefinedMenuItem::separator(app)?;
+    let autostart = CheckMenuItem::with_id(
+        app,
+        "autostart",
+        "Iniciar al iniciar sesión",
+        true,
+        autostart_on,
+        None::<&str>,
+    )?;
+    let clear = MenuItem::with_id(app, "clear", "Limpiar historial", true, None::<&str>)?;
+    let update = match &pending {
+        Some(u) => MenuItem::with_id(
+            app,
+            "update",
+            format!("Actualizar a {} y reiniciar", u.tag),
+            true,
+            None::<&str>,
+        )?,
+        None => MenuItem::with_id(app, "update", "Buscar actualizaciones", false, None::<&str>)?,
+    };
+    let sep2 = PredefinedMenuItem::separator(app)?;
+    let version = MenuItem::with_id(
+        app,
+        "version",
+        format!("Clipboard Saver {}", updater::RELEASE_TAG.unwrap_or("dev")),
+        false,
+        None::<&str>,
+    )?;
+    let quit = MenuItem::with_id(app, "quit", "Salir", true, None::<&str>)?;
+
+    Menu::with_items(
+        app,
+        &[
+            &show, &sep1, &autostart, &clear, &update, &sep2, &version, &quit,
+        ],
+    )
+}
+
+/// Rebuilds and reinstalls the tray menu so it reflects fresh state.
+fn rebuild_tray_menu(app: &AppHandle) {
+    if let Ok(menu) = build_tray_menu(app) {
+        if let Some(tray) = app.tray_by_id("main") {
+            let _ = tray.set_menu(Some(menu));
+        }
+    }
+}
+
+/// Handles a tray menu item selection.
+fn on_tray_menu(app: &AppHandle, id: &str) {
+    match id {
+        "show" => toggle_panel(app),
+        "autostart" => toggle_autostart_inner(app),
+        "clear" => clear_all(app),
+        "update" => {
+            let pending = app
+                .state::<AppState>()
+                .core
+                .lock()
+                .unwrap()
+                .pending_update
+                .clone();
+            if let Some(u) = pending {
+                // On success this exits the process and relaunches.
+                if let Err(e) = updater::install_and_relaunch(&u) {
+                    eprintln!("clipboard_saver: update failed: {e}");
+                }
+            }
+        }
+        "quit" => app.exit(0),
+        _ => {}
+    }
+}
+
 fn toggle_panel(app: &AppHandle) {
     let Some(win) = app.get_webview_window("main") else {
         return;
@@ -526,10 +626,14 @@ fn main() {
                 }
             });
 
+            let tray_menu = build_tray_menu(app.handle())?;
             TrayIconBuilder::with_id("main")
                 .icon(Image::new_owned(tray_rgba(), 36, 36))
                 .icon_as_template(true)
                 .tooltip("Clipboard Saver (⌘⇧V)")
+                .menu(&tray_menu)
+                .show_menu_on_left_click(false)
+                .on_menu_event(|app, event| on_tray_menu(app, event.id().0.as_str()))
                 .on_tray_icon_event(|tray, event| {
                     tauri_plugin_positioner::on_tray_event(tray.app_handle(), &event);
                     if let TrayIconEvent::Click {
@@ -559,6 +663,7 @@ fn main() {
                     .lock()
                     .unwrap()
                     .pending_update = Some(update);
+                rebuild_tray_menu(&handle);
                 let _ = handle.emit("state-changed", ());
             });
 
