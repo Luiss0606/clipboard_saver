@@ -88,6 +88,41 @@ kbd {
   padding: 1px 5px;
 }
 
+/* ── Type filter (segmented) ────────────────────────────── */
+
+.type-filter {
+  display: flex;
+  gap: 2px;
+  padding: 6px;
+  margin: 8px 10px 0;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--text) 6%, transparent);
+}
+
+.seg {
+  flex: 1;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-dim);
+  padding: 4px 0;
+  cursor: pointer;
+  transition: background 150ms ease, color 150ms ease;
+}
+
+.seg:hover {
+  color: var(--text);
+}
+
+.seg.active {
+  background: var(--accent);
+  color: #fff;
+  font-weight: 600;
+}
+
 /* ── Update banner ──────────────────────────────────────── */
 
 .update-banner {
