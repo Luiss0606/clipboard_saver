@@ -7,6 +7,7 @@ const emptyEl = $("empty");
 const searchEl = $("search");
 const actionBarEl = $("action-bar");
 const selCountEl = $("sel-count");
+const panelEl = document.querySelector(".panel");
 
 let state = { items: [], autostart: false, version: "dev", pendingUpdate: null, maxItems: 40 };
 let filtered = [];
@@ -322,11 +323,18 @@ $("update-btn").addEventListener("click", async () => {
   }
 });
 
+function playOpenAnimation() {
+  panelEl.classList.remove("opening");
+  void panelEl.offsetWidth; // reflow so re-adding the class restarts the animation
+  panelEl.classList.add("opening");
+}
+
 window.addEventListener("focus", () => {
   searchEl.value = "";
   selected = 0;
   clearSelection();
   setTypeFilter("all");
+  playOpenAnimation();
   searchEl.focus();
   refresh();
 });

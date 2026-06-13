@@ -48,6 +48,29 @@ body {
   overflow: hidden;
 }
 
+/* Open animation: content slides down from the tray and fades in */
+@keyframes panel-in {
+  from {
+    opacity: 0;
+    transform: translateY(-8px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.panel.opening {
+  animation: panel-in 180ms cubic-bezier(0.16, 1, 0.3, 1);
+  transform-origin: top center;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .panel.opening {
+    animation: none;
+  }
+}
+
 /* ── Header ─────────────────────────────────────────────── */
 
 .header {
