@@ -11,8 +11,9 @@ mod watcher;
 use std::collections::HashMap;
 use std::fs;
 use std::io::Cursor;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 
@@ -64,6 +65,17 @@ struct Core {
 struct AppState {
     core: Mutex<Core>,
     clipboard_tx: Sender<ClipboardMsg>,
+    /// Set while a native drag-out session is active, so the focus-loss
+    /// handler doesn't hide the panel out from under the drag.
+    dragging: Arc<AtomicBool>,
+}
+
+/// Payload for a drag-out: the full text, or the absolute PNG path.
+#[derive(serde::Serialize)]
+#[serde(tag = "kind", rename_all = "lowercase")]
+enum DragData {
+    Text { text: String },
+    Image { path: String },
 }
 
 impl Core {
@@ -300,6 +312,24 @@ fn copy_selected(ids: Vec<u64>, state: tauri::State<AppState>) {
 }
 
 #[tauri::command]
+fn drag_data(id: u64, state: tauri::State<AppState>) -> Option<DragData> {
+    let core = state.core.lock().unwrap();
+    let item = core.history.get(id)?;
+    match &item.kind {
+        ItemKind::Text(text) => Some(DragData::Text { text: text.clone() }),
+        ItemKind::Image { png, .. } => {
+            let path = core.storage.image_path(png).to_string_lossy().into_owned();
+            Some(DragData::Image { path })
+        }
+    }
+}
+
+#[tauri::command]
+fn set_dragging(on: bool, state: tauri::State<AppState>) {
+    state.dragging.store(on, Ordering::SeqCst);
+}
+
+#[tauri::command]
 fn hide_panel(window: tauri::WebviewWindow) {
     let _ = window.hide();
 }
@@ -359,9 +389,11 @@ fn clipboard_thread(app: AppHandle, rx: Receiver<ClipboardMsg>) {
 fn main() {
     let (clipboard_tx, clipboard_rx) = mpsc::channel::<ClipboardMsg>();
     let clipboard_rx = Mutex::new(Some(clipboard_rx));
+    let dragging = Arc::new(AtomicBool::new(false));
 
     tauri::Builder::default()
         .plugin(tauri_plugin_positioner::init())
+        .plugin(tauri_plugin_drag::init())
         .plugin(
             tauri_plugin_global_shortcut::Builder::new()
                 .with_shortcuts([SHORTCUT])
@@ -376,6 +408,7 @@ fn main() {
         .manage(AppState {
             core: Mutex::new(Core::load()),
             clipboard_tx,
+            dragging: dragging.clone(),
         })
         .invoke_handler(tauri::generate_handler![
             get_state,
@@ -383,6 +416,8 @@ fn main() {
             clear_history,
             delete_items,
             copy_selected,
+            drag_data,
+            set_dragging,
             toggle_autostart,
             install_update,
             hide_panel,
@@ -410,9 +445,14 @@ fn main() {
                 .build()?;
 
             let win = window.clone();
+            let drag_flag = dragging.clone();
             window.on_window_event(move |event| {
                 if let WindowEvent::Focused(false) = event {
-                    let _ = win.hide();
+                    // Don't hide while a drag-out is in flight, or the native
+                    // drag session would be cancelled mid-gesture.
+                    if !drag_flag.load(Ordering::SeqCst) {
+                        let _ = win.hide();
+                    }
                 }
             });
 

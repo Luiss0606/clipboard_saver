@@ -1,4 +1,4 @@
-const { invoke } = window.__TAURI__.core;
+const { invoke, Channel } = window.__TAURI__.core;
 const { listen } = window.__TAURI__.event;
 
 const $ = (id) => document.getElementById(id);
@@ -162,6 +162,13 @@ function render() {
       }
     });
 
+    // Native drag-out: drop the card into another app (Finder, Notes, editor).
+    row.draggable = true;
+    row.addEventListener("dragstart", (e) => {
+      e.preventDefault(); // hand off to the native drag session
+      startDragOut(item);
+    });
+
     listEl.appendChild(row);
   });
 
@@ -205,6 +212,64 @@ async function refresh() {
 
 async function restore(id) {
   await invoke("restore_item", { id });
+}
+
+// Draws a small labelled chip to use as the drag ghost for text items
+// (the native drag API requires a preview image).
+function textDragPreview(text) {
+  const scale = window.devicePixelRatio || 2;
+  const w = 240;
+  const h = 40;
+  const canvas = document.createElement("canvas");
+  canvas.width = w * scale;
+  canvas.height = h * scale;
+  const ctx = canvas.getContext("2d");
+  ctx.scale(scale, scale);
+  ctx.fillStyle = "rgba(40, 40, 40, 0.92)";
+  ctx.fillRect(0, 0, w, h);
+  ctx.fillStyle = "#fff";
+  ctx.font = '13px -apple-system, "SF Pro Text", sans-serif';
+  ctx.textBaseline = "middle";
+  const line = text.replace(/\s+/g, " ").trim().slice(0, 34);
+  ctx.fillText(line, 12, h / 2);
+  return canvas.toDataURL("image/png");
+}
+
+// Starts a native drag-out session for the given item. The panel is kept
+// open during the drag (set_dragging guard) and hidden once it ends.
+async function startDragOut(item) {
+  const data = await invoke("drag_data", { id: item.id });
+  if (!data) return;
+
+  let dragItem;
+  let image;
+  if (data.kind === "image") {
+    dragItem = [data.path];
+    image = item.thumb; // already a data:image/png;base64 URL
+  } else {
+    dragItem = { data: data.text, types: ["public.utf8-plain-text"] };
+    image = textDragPreview(data.text);
+  }
+
+  await invoke("set_dragging", { on: true });
+
+  const onEvent = new Channel();
+  onEvent.onmessage = () => {
+    invoke("set_dragging", { on: false });
+    invoke("hide_panel");
+  };
+
+  try {
+    await invoke("plugin:drag|start_drag", {
+      item: dragItem,
+      image,
+      options: { mode: "copy" },
+      onEvent,
+    });
+  } catch (err) {
+    console.error("drag failed", err);
+    invoke("set_dragging", { on: false });
+  }
 }
 
 async function copySelected() {
