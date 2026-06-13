@@ -19,8 +19,9 @@ use std::time::Duration;
 
 use base64::engine::general_purpose::STANDARD as BASE64;
 use base64::Engine;
-use objc2::MainThreadMarker;
-use objc2_app_kit::NSApplication;
+use objc2::runtime::{AnyClass, AnyObject};
+use objc2::ClassType;
+use objc2_app_kit::{NSPanel, NSWindow, NSWindowStyleMask};
 use tauri::image::Image;
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::utils::config::WindowEffectsConfig;
@@ -357,18 +358,31 @@ fn set_dragging(on: bool, state: tauri::State<AppState>) {
     state.dragging.store(on, Ordering::SeqCst);
 }
 
-/// Called when a drag-out ends. Clears the drag guard, yields active status
-/// (so the app the items were dropped into stays frontmost instead of focus
-/// bouncing back to the previously active app), then hides the panel.
+/// Called when a drag-out ends: clears the drag guard and hides the panel.
+/// The panel is a non-activating NSPanel, so our app never stole focus from
+/// the drop target — hiding here leaves that app frontmost.
 #[tauri::command]
-fn finish_drag(app: AppHandle, window: tauri::WebviewWindow, state: tauri::State<AppState>) {
+fn finish_drag(window: tauri::WebviewWindow, state: tauri::State<AppState>) {
     state.dragging.store(false, Ordering::SeqCst);
-    let _ = app.run_on_main_thread(move || {
-        if let Some(mtm) = MainThreadMarker::new() {
-            NSApplication::sharedApplication(mtm).deactivate();
-        }
-        let _ = window.hide();
-    });
+    let _ = window.hide();
+}
+
+/// Reclass the window to a non-activating NSPanel so showing the panel never
+/// activates our app. That keeps whatever app the user was in (or dropped
+/// into) frontmost. Must run on the main thread.
+fn make_nonactivating_panel(window: &tauri::WebviewWindow) {
+    let Ok(ptr) = window.ns_window() else {
+        return;
+    };
+    let ns = ptr as *mut AnyObject;
+    extern "C" {
+        fn object_setClass(obj: *mut AnyObject, cls: *const AnyClass) -> *const AnyClass;
+    }
+    unsafe {
+        object_setClass(ns, NSPanel::class());
+        let win: &NSWindow = &*(ns as *const NSWindow);
+        win.setStyleMask(win.styleMask() | NSWindowStyleMask::NonactivatingPanel);
+    }
 }
 
 #[tauri::command]
@@ -394,7 +408,16 @@ fn toggle_panel(app: &AppHandle) {
             let _ = win.move_window(Position::TopRight);
         }
         let _ = win.show();
-        let _ = win.set_focus();
+        // Make the panel key for keyboard input WITHOUT activating our app
+        // (it's a non-activating NSPanel), so the user's current app stays
+        // frontmost. set_focus() would call NSApp activate and steal focus.
+        let win2 = win.clone();
+        let _ = app.run_on_main_thread(move || {
+            if let Ok(ptr) = win2.ns_window() {
+                let w: &NSWindow = unsafe { &*(ptr as *const NSWindow) };
+                w.makeKeyAndOrderFront(None);
+            }
+        });
     }
 }
 
@@ -486,6 +509,10 @@ fn main() {
                     color: None,
                 })
                 .build()?;
+
+            // Turn the window into a non-activating panel so it never steals
+            // app focus (keeps the drop target / current app frontmost).
+            make_nonactivating_panel(&window);
 
             let win = window.clone();
             let drag_flag = dragging.clone();
