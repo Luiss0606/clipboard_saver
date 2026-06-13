@@ -19,6 +19,8 @@ use std::time::Duration;
 
 use base64::engine::general_purpose::STANDARD as BASE64;
 use base64::Engine;
+use objc2::MainThreadMarker;
+use objc2_app_kit::NSApplication;
 use tauri::image::Image;
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::utils::config::WindowEffectsConfig;
@@ -355,6 +357,20 @@ fn set_dragging(on: bool, state: tauri::State<AppState>) {
     state.dragging.store(on, Ordering::SeqCst);
 }
 
+/// Called when a drag-out ends. Clears the drag guard, yields active status
+/// (so the app the items were dropped into stays frontmost instead of focus
+/// bouncing back to the previously active app), then hides the panel.
+#[tauri::command]
+fn finish_drag(app: AppHandle, window: tauri::WebviewWindow, state: tauri::State<AppState>) {
+    state.dragging.store(false, Ordering::SeqCst);
+    let _ = app.run_on_main_thread(move || {
+        if let Some(mtm) = MainThreadMarker::new() {
+            NSApplication::sharedApplication(mtm).deactivate();
+        }
+        let _ = window.hide();
+    });
+}
+
 #[tauri::command]
 fn hide_panel(window: tauri::WebviewWindow) {
     let _ = window.hide();
@@ -444,6 +460,7 @@ fn main() {
             copy_selected,
             drag_payload,
             set_dragging,
+            finish_drag,
             toggle_autostart,
             install_update,
             hide_panel,

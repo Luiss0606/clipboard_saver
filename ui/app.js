@@ -268,8 +268,8 @@ async function startDragOut(ids, leadItem) {
 
   const onEvent = new Channel();
   onEvent.onmessage = () => {
-    invoke("set_dragging", { on: false });
-    invoke("hide_panel");
+    // Clears the drag guard, yields focus to the drop target, hides the panel.
+    invoke("finish_drag");
   };
 
   try {
@@ -281,7 +281,7 @@ async function startDragOut(ids, leadItem) {
     });
   } catch (err) {
     console.error("drag failed", err);
-    invoke("set_dragging", { on: false });
+    invoke("finish_drag");
   }
 }
 
