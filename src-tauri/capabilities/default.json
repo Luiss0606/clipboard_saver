@@ -3,5 +3,5 @@
   "identifier": "default",
   "description": "Panel window: core APIs and event listening",
   "windows": ["main"],
-  "permissions": ["core:default"]
+  "permissions": ["core:default", "drag:default"]
 }

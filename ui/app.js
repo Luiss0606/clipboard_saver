@@ -1,4 +1,4 @@
-const { invoke } = window.__TAURI__.core;
+const { invoke, Channel } = window.__TAURI__.core;
 const { listen } = window.__TAURI__.event;
 
 const $ = (id) => document.getElementById(id);
@@ -162,6 +162,18 @@ function render() {
       }
     });
 
+    // Native drag-out: drop the card into another app (Finder, Notes, editor).
+    // Dragging a selected card drags the whole selection; otherwise just it.
+    row.draggable = true;
+    row.addEventListener("dragstart", (e) => {
+      e.preventDefault(); // hand off to the native drag session
+      const ids =
+        selectedIds.length > 1 && selectedIds.includes(item.id)
+          ? [...selectedIds]
+          : [item.id];
+      startDragOut(ids, item);
+    });
+
     listEl.appendChild(row);
   });
 
@@ -205,6 +217,72 @@ async function refresh() {
 
 async function restore(id) {
   await invoke("restore_item", { id });
+}
+
+// Draws a small labelled chip to use as the drag ghost for text items
+// (the native drag API requires a preview image).
+function textDragPreview(text) {
+  const scale = window.devicePixelRatio || 2;
+  const w = 240;
+  const h = 40;
+  const canvas = document.createElement("canvas");
+  canvas.width = w * scale;
+  canvas.height = h * scale;
+  const ctx = canvas.getContext("2d");
+  ctx.scale(scale, scale);
+  ctx.fillStyle = "rgba(40, 40, 40, 0.92)";
+  ctx.fillRect(0, 0, w, h);
+  ctx.fillStyle = "#fff";
+  ctx.font = '13px -apple-system, "SF Pro Text", sans-serif';
+  ctx.textBaseline = "middle";
+  const line = text.replace(/\s+/g, " ").trim().slice(0, 34);
+  ctx.fillText(line, 12, h / 2);
+  return canvas.toDataURL("image/png");
+}
+
+// Starts a native drag-out session for the given items. When more than one
+// id is passed the whole selection is dragged. The panel stays open during
+// the drag (set_dragging guard) and hides once it ends.
+async function startDragOut(ids, leadItem) {
+  const data = await invoke("drag_payload", { ids });
+  if (!data) return;
+
+  let dragItem;
+  let image;
+  if (data.kind === "files") {
+    dragItem = data.paths;
+    // Preview: the dragged image's thumb, else a labelled chip.
+    image =
+      leadItem.kind === "image" && leadItem.thumb
+        ? leadItem.thumb
+        : textDragPreview(`${ids.length} elementos`);
+  } else {
+    dragItem = { data: data.text, types: ["public.utf8-plain-text"] };
+    image =
+      ids.length > 1
+        ? textDragPreview(`${ids.length} elementos`)
+        : textDragPreview(data.text);
+  }
+
+  await invoke("set_dragging", { on: true });
+
+  const onEvent = new Channel();
+  onEvent.onmessage = () => {
+    // Clears the drag guard, yields focus to the drop target, hides the panel.
+    invoke("finish_drag");
+  };
+
+  try {
+    await invoke("plugin:drag|start_drag", {
+      item: dragItem,
+      image,
+      options: { mode: "copy" },
+      onEvent,
+    });
+  } catch (err) {
+    console.error("drag failed", err);
+    invoke("finish_drag");
+  }
 }
 
 async function copySelected() {
