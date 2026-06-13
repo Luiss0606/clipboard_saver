@@ -13,6 +13,8 @@ let filtered = [];
 let selected = 0;
 // Ordered by click time — sent to backend in this order for concatenation.
 let selectedIds = [];
+// Type filter: "all" | "text" | "image".
+let typeFilter = "all";
 // Last item picked individually — the pivot for Shift+click range selection.
 let anchorId = null;
 
@@ -68,9 +70,11 @@ function updateActionBar() {
 
 function render() {
   const q = searchEl.value.trim().toLowerCase();
-  filtered = q
-    ? state.items.filter((it) => it.preview.toLowerCase().includes(q))
-    : state.items;
+  filtered = state.items.filter(
+    (it) =>
+      (typeFilter === "all" || it.kind === typeFilter) &&
+      (!q || it.preview.toLowerCase().includes(q))
+  );
   if (selected >= filtered.length) selected = Math.max(0, filtered.length - 1);
 
   listEl.innerHTML = "";
@@ -201,6 +205,24 @@ searchEl.addEventListener("input", () => {
   render();
 });
 
+function setTypeFilter(filter) {
+  if (filter === typeFilter) return;
+  typeFilter = filter;
+  [...$("type-filter").children].forEach((btn) => {
+    const active = btn.dataset.filter === filter;
+    btn.classList.toggle("active", active);
+    btn.setAttribute("aria-selected", active ? "true" : "false");
+  });
+  selected = 0;
+  clearSelection();
+  render();
+}
+
+$("type-filter").addEventListener("click", (e) => {
+  const btn = e.target.closest(".seg");
+  if (btn) setTypeFilter(btn.dataset.filter);
+});
+
 document.addEventListener("keydown", (e) => {
   if (e.key === "Escape") {
     if (selectedIds.length > 0) {
@@ -275,6 +297,7 @@ window.addEventListener("focus", () => {
   searchEl.value = "";
   selected = 0;
   clearSelection();
+  setTypeFilter("all");
   searchEl.focus();
   refresh();
 });
