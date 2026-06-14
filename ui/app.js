@@ -77,6 +77,9 @@ function render() {
   );
   if (selected >= filtered.length) selected = Math.max(0, filtered.length - 1);
 
+  // Rebuilding the list resets scrollTop; remember it so selection changes
+  // (e.g. Shift+click) don't jump the view back to the top.
+  const prevScroll = listEl.scrollTop;
   listEl.innerHTML = "";
   emptyEl.classList.toggle("hidden", state.items.length > 0);
   listEl.classList.toggle("hidden", state.items.length === 0);
@@ -192,6 +195,7 @@ function render() {
 
   updateActionBar();
   layoutMasonry();
+  listEl.scrollTop = prevScroll;
 }
 
 // Masonry: each card spans as many 1px grid rows as its height (plus the
@@ -310,6 +314,7 @@ searchEl.addEventListener("input", () => {
   selected = 0;
   clearSelection();
   render();
+  listEl.scrollTop = 0; // new query starts at the top
 });
 
 function setTypeFilter(filter) {
@@ -323,6 +328,7 @@ function setTypeFilter(filter) {
   selected = 0;
   clearSelection();
   render();
+  listEl.scrollTop = 0; // switching filter starts at the top
 }
 
 $("type-filter").addEventListener("click", (e) => {
@@ -405,6 +411,7 @@ window.addEventListener("focus", () => {
   selected = 0;
   clearSelection();
   setTypeFilter("all");
+  listEl.scrollTop = 0; // reopen at the top
   searchEl.focus();
   refresh();
 });
