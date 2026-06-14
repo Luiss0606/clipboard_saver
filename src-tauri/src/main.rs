@@ -11,7 +11,7 @@ mod watcher;
 use std::collections::HashMap;
 use std::fs;
 use std::io::Cursor;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -19,10 +19,10 @@ use std::time::Duration;
 
 use base64::engine::general_purpose::STANDARD as BASE64;
 use base64::Engine;
-use objc2::runtime::{AnyClass, AnyObject};
-use objc2::ClassType;
-use objc2_app_kit::{NSPanel, NSWindow, NSWindowStyleMask};
+use objc2::MainThreadMarker;
+use objc2_app_kit::{NSApplicationActivationOptions, NSRunningApplication, NSWorkspace};
 use tauri::image::Image;
+use tauri::menu::{CheckMenuItem, Menu, MenuItem, PredefinedMenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::utils::config::WindowEffectsConfig;
 use tauri::utils::{WindowEffect, WindowEffectState};
@@ -71,6 +71,9 @@ struct AppState {
     /// Set while a native drag-out session is active, so the focus-loss
     /// handler doesn't hide the panel out from under the drag.
     dragging: Arc<AtomicBool>,
+    /// PID of the app that was frontmost just before the panel opened, so a
+    /// drag-drop can hand focus back to it (-1 = none).
+    prev_app_pid: Arc<AtomicI32>,
 }
 
 /// Payload for a drag-out. The native drag session is either inline text
@@ -207,8 +210,9 @@ fn restore_item(id: u64, state: tauri::State<AppState>, window: tauri::WebviewWi
     let _ = window.hide();
 }
 
-#[tauri::command]
-fn clear_history(app: AppHandle, state: tauri::State<AppState>) {
+/// Wipes the whole history. Shared by the panel command and the tray menu.
+fn clear_all(app: &AppHandle) {
+    let state = app.state::<AppState>();
     let mut core = state.core.lock().unwrap();
     let removed = core.history.clear();
     core.storage.delete_images(&removed);
@@ -218,8 +222,9 @@ fn clear_history(app: AppHandle, state: tauri::State<AppState>) {
     let _ = app.emit("state-changed", ());
 }
 
-#[tauri::command]
-fn toggle_autostart(app: AppHandle) {
+/// Flips launch-at-login and keeps the tray menu checkbox in sync. Shared by
+/// the panel command and the tray menu.
+fn toggle_autostart_inner(app: &AppHandle) {
     let result = if autostart::is_enabled() {
         autostart::disable()
     } else {
@@ -228,7 +233,18 @@ fn toggle_autostart(app: AppHandle) {
     if let Err(e) = result {
         eprintln!("clipboard_saver: cannot toggle autostart: {e}");
     }
+    rebuild_tray_menu(app);
     let _ = app.emit("state-changed", ());
+}
+
+#[tauri::command]
+fn clear_history(app: AppHandle) {
+    clear_all(&app);
+}
+
+#[tauri::command]
+fn toggle_autostart(app: AppHandle) {
+    toggle_autostart_inner(&app);
 }
 
 #[tauri::command]
@@ -358,31 +374,46 @@ fn set_dragging(on: bool, state: tauri::State<AppState>) {
     state.dragging.store(on, Ordering::SeqCst);
 }
 
-/// Called when a drag-out ends: clears the drag guard and hides the panel.
-/// The panel is a non-activating NSPanel, so our app never stole focus from
-/// the drop target — hiding here leaves that app frontmost.
+/// Called when a drag-out ends: clears the drag guard, hands focus back to
+/// the app that was frontmost before the panel opened (so the drop target
+/// stays active instead of bouncing), then hides the panel.
 #[tauri::command]
-fn finish_drag(window: tauri::WebviewWindow, state: tauri::State<AppState>) {
+fn finish_drag(app: AppHandle, window: tauri::WebviewWindow, state: tauri::State<AppState>) {
     state.dragging.store(false, Ordering::SeqCst);
+    activate_prev_app(&app);
     let _ = window.hide();
 }
 
-/// Reclass the window to a non-activating NSPanel so showing the panel never
-/// activates our app. That keeps whatever app the user was in (or dropped
-/// into) frontmost. Must run on the main thread.
-fn make_nonactivating_panel(window: &tauri::WebviewWindow) {
-    let Ok(ptr) = window.ns_window() else {
+/// Records the app frontmost right now (before the panel takes focus) so a
+/// later drag-drop can restore it. No-op off the main thread or if our own
+/// app is already frontmost. Call from the main thread (tray/shortcut).
+fn capture_frontmost_app(app: &AppHandle) {
+    if MainThreadMarker::new().is_none() {
         return;
-    };
-    let ns = ptr as *mut AnyObject;
-    extern "C" {
-        fn object_setClass(obj: *mut AnyObject, cls: *const AnyClass) -> *const AnyClass;
     }
-    unsafe {
-        object_setClass(ns, NSPanel::class());
-        let win: &NSWindow = &*(ns as *const NSWindow);
-        win.setStyleMask(win.styleMask() | NSWindowStyleMask::NonactivatingPanel);
+    let our_pid = std::process::id() as i32;
+    let pid = NSWorkspace::sharedWorkspace()
+        .frontmostApplication()
+        .map(|a| a.processIdentifier())
+        .unwrap_or(-1);
+    if pid >= 0 && pid != our_pid {
+        app.state::<AppState>()
+            .prev_app_pid
+            .store(pid, Ordering::SeqCst);
     }
+}
+
+/// Reactivates the app captured by [`capture_frontmost_app`].
+fn activate_prev_app(app: &AppHandle) {
+    let pid = app.state::<AppState>().prev_app_pid.load(Ordering::SeqCst);
+    if pid < 0 {
+        return;
+    }
+    let _ = app.run_on_main_thread(move || {
+        if let Some(running) = NSRunningApplication::runningApplicationWithProcessIdentifier(pid) {
+            let _ = running.activateWithOptions(NSApplicationActivationOptions::ActivateAllWindows);
+        }
+    });
 }
 
 #[tauri::command]
@@ -395,6 +426,92 @@ fn quit_app(app: AppHandle) {
     app.exit(0);
 }
 
+/// Builds the right-click tray menu, reflecting current autostart and update
+/// state. Rebuilt via [`rebuild_tray_menu`] whenever that state changes.
+fn build_tray_menu(app: &AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
+    let autostart_on = autostart::is_enabled();
+    let pending = app
+        .state::<AppState>()
+        .core
+        .lock()
+        .unwrap()
+        .pending_update
+        .clone();
+
+    let show = MenuItem::with_id(app, "show", "Mostrar Clipboard Saver", true, None::<&str>)?;
+    let sep1 = PredefinedMenuItem::separator(app)?;
+    let autostart = CheckMenuItem::with_id(
+        app,
+        "autostart",
+        "Iniciar al iniciar sesión",
+        true,
+        autostart_on,
+        None::<&str>,
+    )?;
+    let clear = MenuItem::with_id(app, "clear", "Limpiar historial", true, None::<&str>)?;
+    let update = match &pending {
+        Some(u) => MenuItem::with_id(
+            app,
+            "update",
+            format!("Actualizar a {} y reiniciar", u.tag),
+            true,
+            None::<&str>,
+        )?,
+        None => MenuItem::with_id(app, "update", "Buscar actualizaciones", false, None::<&str>)?,
+    };
+    let sep2 = PredefinedMenuItem::separator(app)?;
+    let version = MenuItem::with_id(
+        app,
+        "version",
+        format!("Clipboard Saver {}", updater::RELEASE_TAG.unwrap_or("dev")),
+        false,
+        None::<&str>,
+    )?;
+    let quit = MenuItem::with_id(app, "quit", "Salir", true, None::<&str>)?;
+
+    Menu::with_items(
+        app,
+        &[
+            &show, &sep1, &autostart, &clear, &update, &sep2, &version, &quit,
+        ],
+    )
+}
+
+/// Rebuilds and reinstalls the tray menu so it reflects fresh state.
+fn rebuild_tray_menu(app: &AppHandle) {
+    if let Ok(menu) = build_tray_menu(app) {
+        if let Some(tray) = app.tray_by_id("main") {
+            let _ = tray.set_menu(Some(menu));
+        }
+    }
+}
+
+/// Handles a tray menu item selection.
+fn on_tray_menu(app: &AppHandle, id: &str) {
+    match id {
+        "show" => toggle_panel(app),
+        "autostart" => toggle_autostart_inner(app),
+        "clear" => clear_all(app),
+        "update" => {
+            let pending = app
+                .state::<AppState>()
+                .core
+                .lock()
+                .unwrap()
+                .pending_update
+                .clone();
+            if let Some(u) = pending {
+                // On success this exits the process and relaunches.
+                if let Err(e) = updater::install_and_relaunch(&u) {
+                    eprintln!("clipboard_saver: update failed: {e}");
+                }
+            }
+        }
+        "quit" => app.exit(0),
+        _ => {}
+    }
+}
+
 fn toggle_panel(app: &AppHandle) {
     let Some(win) = app.get_webview_window("main") else {
         return;
@@ -402,22 +519,16 @@ fn toggle_panel(app: &AppHandle) {
     if win.is_visible().unwrap_or(false) {
         let _ = win.hide();
     } else {
+        // Remember the current app before we steal focus, so a drag-drop can
+        // hand focus back to it.
+        capture_frontmost_app(app);
         // Tray-relative when the tray position is known; fallback otherwise
         // (e.g. the panel was summoned by hotkey before any tray event).
         if win.move_window(Position::TrayBottomCenter).is_err() {
             let _ = win.move_window(Position::TopRight);
         }
         let _ = win.show();
-        // Make the panel key for keyboard input WITHOUT activating our app
-        // (it's a non-activating NSPanel), so the user's current app stays
-        // frontmost. set_focus() would call NSApp activate and steal focus.
-        let win2 = win.clone();
-        let _ = app.run_on_main_thread(move || {
-            if let Ok(ptr) = win2.ns_window() {
-                let w: &NSWindow = unsafe { &*(ptr as *const NSWindow) };
-                w.makeKeyAndOrderFront(None);
-            }
-        });
+        let _ = win.set_focus();
     }
 }
 
@@ -455,6 +566,7 @@ fn main() {
     let (clipboard_tx, clipboard_rx) = mpsc::channel::<ClipboardMsg>();
     let clipboard_rx = Mutex::new(Some(clipboard_rx));
     let dragging = Arc::new(AtomicBool::new(false));
+    let prev_app_pid = Arc::new(AtomicI32::new(-1));
 
     tauri::Builder::default()
         .plugin(tauri_plugin_positioner::init())
@@ -474,6 +586,7 @@ fn main() {
             core: Mutex::new(Core::load()),
             clipboard_tx,
             dragging: dragging.clone(),
+            prev_app_pid,
         })
         .invoke_handler(tauri::generate_handler![
             get_state,
@@ -510,10 +623,6 @@ fn main() {
                 })
                 .build()?;
 
-            // Turn the window into a non-activating panel so it never steals
-            // app focus (keeps the drop target / current app frontmost).
-            make_nonactivating_panel(&window);
-
             let win = window.clone();
             let drag_flag = dragging.clone();
             window.on_window_event(move |event| {
@@ -526,10 +635,14 @@ fn main() {
                 }
             });
 
+            let tray_menu = build_tray_menu(app.handle())?;
             TrayIconBuilder::with_id("main")
                 .icon(Image::new_owned(tray_rgba(), 36, 36))
                 .icon_as_template(true)
                 .tooltip("Clipboard Saver (⌘⇧V)")
+                .menu(&tray_menu)
+                .show_menu_on_left_click(false)
+                .on_menu_event(|app, event| on_tray_menu(app, event.id().0.as_str()))
                 .on_tray_icon_event(|tray, event| {
                     tauri_plugin_positioner::on_tray_event(tray.app_handle(), &event);
                     if let TrayIconEvent::Click {
@@ -559,6 +672,7 @@ fn main() {
                     .lock()
                     .unwrap()
                     .pending_update = Some(update);
+                rebuild_tray_menu(&handle);
                 let _ = handle.emit("state-changed", ());
             });
 
