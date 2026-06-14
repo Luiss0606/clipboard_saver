@@ -31,9 +31,11 @@ function toggleIdInSelection(id) {
   updateActionBar();
 }
 
-// Adds every item between the anchor and `targetId` (inclusive, visual order)
-// to the selection, then moves the anchor to the target. Without a valid
-// anchor it just selects the target and seeds it as the new anchor.
+// Range select/deselect between the anchor and `targetId` (inclusive, visual
+// order), then moves the anchor to the target. If the target is already
+// selected the range is DEselected, otherwise it's selected — so Shift+click
+// inside the current selection shrinks it. Without a valid anchor it just
+// selects the target and seeds it as the new anchor.
 function selectRange(targetId) {
   const aIdx = anchorId === null ? -1 : filtered.findIndex((i) => i.id === anchorId);
   const tIdx = filtered.findIndex((i) => i.id === targetId);
@@ -41,9 +43,15 @@ function selectRange(targetId) {
   if (aIdx === -1) {
     if (!selectedIds.includes(targetId)) selectedIds.push(targetId);
   } else {
+    const deselect = selectedIds.includes(targetId);
     for (let i = Math.min(aIdx, tIdx); i <= Math.max(aIdx, tIdx); i++) {
       const id = filtered[i].id;
-      if (!selectedIds.includes(id)) selectedIds.push(id);
+      const idx = selectedIds.indexOf(id);
+      if (deselect) {
+        if (idx !== -1) selectedIds.splice(idx, 1);
+      } else if (idx === -1) {
+        selectedIds.push(id);
+      }
     }
   }
   anchorId = targetId;
