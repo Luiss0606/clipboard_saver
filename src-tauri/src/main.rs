@@ -411,8 +411,7 @@ fn activate_prev_app(app: &AppHandle) {
     }
     let _ = app.run_on_main_thread(move || {
         if let Some(running) = NSRunningApplication::runningApplicationWithProcessIdentifier(pid) {
-            let _ = running
-                .activateWithOptions(NSApplicationActivationOptions::ActivateIgnoringOtherApps);
+            let _ = running.activateWithOptions(NSApplicationActivationOptions::ActivateAllWindows);
         }
     });
 }
