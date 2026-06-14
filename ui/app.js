@@ -31,9 +31,11 @@ function toggleIdInSelection(id) {
   updateActionBar();
 }
 
-// Adds every item between the anchor and `targetId` (inclusive, visual order)
-// to the selection, then moves the anchor to the target. Without a valid
-// anchor it just selects the target and seeds it as the new anchor.
+// Range select/deselect between the anchor and `targetId` (inclusive, visual
+// order), then moves the anchor to the target. If the target is already
+// selected the range is DEselected, otherwise it's selected — so Shift+click
+// inside the current selection shrinks it. Without a valid anchor it just
+// selects the target and seeds it as the new anchor.
 function selectRange(targetId) {
   const aIdx = anchorId === null ? -1 : filtered.findIndex((i) => i.id === anchorId);
   const tIdx = filtered.findIndex((i) => i.id === targetId);
@@ -41,9 +43,15 @@ function selectRange(targetId) {
   if (aIdx === -1) {
     if (!selectedIds.includes(targetId)) selectedIds.push(targetId);
   } else {
+    const deselect = selectedIds.includes(targetId);
     for (let i = Math.min(aIdx, tIdx); i <= Math.max(aIdx, tIdx); i++) {
       const id = filtered[i].id;
-      if (!selectedIds.includes(id)) selectedIds.push(id);
+      const idx = selectedIds.indexOf(id);
+      if (deselect) {
+        if (idx !== -1) selectedIds.splice(idx, 1);
+      } else if (idx === -1) {
+        selectedIds.push(id);
+      }
     }
   }
   anchorId = targetId;
@@ -77,6 +85,9 @@ function render() {
   );
   if (selected >= filtered.length) selected = Math.max(0, filtered.length - 1);
 
+  // Rebuilding the list resets scrollTop; remember it so selection changes
+  // (e.g. Shift+click) don't jump the view back to the top.
+  const prevScroll = listEl.scrollTop;
   listEl.innerHTML = "";
   emptyEl.classList.toggle("hidden", state.items.length > 0);
   listEl.classList.toggle("hidden", state.items.length === 0);
@@ -192,6 +203,7 @@ function render() {
 
   updateActionBar();
   layoutMasonry();
+  listEl.scrollTop = prevScroll;
 }
 
 // Masonry: each card spans as many 1px grid rows as its height (plus the
@@ -310,6 +322,7 @@ searchEl.addEventListener("input", () => {
   selected = 0;
   clearSelection();
   render();
+  listEl.scrollTop = 0; // new query starts at the top
 });
 
 function setTypeFilter(filter) {
@@ -323,6 +336,7 @@ function setTypeFilter(filter) {
   selected = 0;
   clearSelection();
   render();
+  listEl.scrollTop = 0; // switching filter starts at the top
 }
 
 $("type-filter").addEventListener("click", (e) => {
@@ -405,6 +419,7 @@ window.addEventListener("focus", () => {
   selected = 0;
   clearSelection();
   setTypeFilter("all");
+  listEl.scrollTop = 0; // reopen at the top
   searchEl.focus();
   refresh();
 });
